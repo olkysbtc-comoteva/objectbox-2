@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "201381433499",
+    "project_id": "comoteva-messaging",
+    "storage_bucket": "comoteva-messaging.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:201381433499:android:5924f06c102e5552ae763e",
+        "android_client_info": {
+          "package_name": "com.aritolp.comoteva"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBFartgDZ3MWVerv6TN-YA34Z7H7Wd0Lp4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

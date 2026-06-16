@@ -1,0 +1,33 @@
+{
+    "version": "3.7.3",
+    "app": {
+        "name": "ComoTeVa",
+        "bundleId": "com.aritolp.comoteva"
+    },
+    "main": [
+        {
+            "key": "supabase",
+            "statement": "await SupabaseService().initialize();",
+            "imports": [
+                "package:comoteva/integrations/supabase_service.dart"
+            ]
+        }
+    ],
+    "experimental": {
+        "load_packages": true
+    },
+    "permissions": [
+        {
+            "key": "android.permission.CAMERA"
+        },
+        {
+            "key": "android.permission.RECORD_AUDIO"
+        },
+        {
+            "key": "android.permission.READ_EXTERNAL_STORAGE"
+        },
+        {
+            "key": "android.permission.WRITE_EXTERNAL_STORAGE"
+        }
+    ]
+}

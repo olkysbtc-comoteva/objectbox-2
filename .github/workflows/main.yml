@@ -1,0 +1,61 @@
+name: Flutter Build APK
+
+on:
+  push:
+    branches:
+      - main
+      - router
+      
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      # ** AÑADE ESTE BLOQUE: Decodifica y coloca el google-services.json **
+      - name: Decode Google Services JSON
+        # Guarda el archivo google-services.json directamente en la carpeta android/app/
+        # Esta es la ubicación que Gradle espera para el plugin de Google Services.
+        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 --decode > android/app/google-services.json
+
+      - name: Decode Keystore
+        # Guardamos el archivo .jks directamente en la carpeta android/app/
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/upload-keystore.jks
+
+      - name: Create key.properties
+        # La ruta 'upload-keystore.jks' es relativa a la carpeta 'app', por eso quitamos el 'app/' anterior
+        run: |
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" > android/key.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
+          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" >> android/key.properties
+          echo "storeFile=upload-keystore.jks" >> android/key.properties
+
+      # SUGERENCIA: Añadir flutter clean para mayor robustez
+      - name: Clean Flutter project
+        run: flutter clean
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build APK (Optimized)
+        run: flutter build apk --release --split-per-abi
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apks
+          path: build/app/outputs/flutter-apk/app-*-release.apk
+          retention-days: 2 # Se borra automáticamente en 48 horas
