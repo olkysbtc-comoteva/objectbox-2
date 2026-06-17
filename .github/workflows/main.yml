@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - router
+      - cache
       
 jobs:
   build:
