@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; 
-import 'package:supabase_flutter/supabase_flutter.dart'; 
+import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,10 +12,11 @@ import 'package:comoteva/integrations/supabase_service.dart';
 import 'package:comoteva/models/chat_room.dart';
 import 'package:comoteva/models/chat_message.dart';
 import 'package:comoteva/globals/app_state.dart';
+import 'package:cached_network_image/cached_network_image.dart'; // <--- NUEVA DEPENDENCIA: Importamos cached_network_image
 
 class ConversationScreen extends StatefulWidget {
   final String roomId;
-  final ChatRoom? chatRoom;
+  final ChatRoom? chatRoom; // El ChatRoom ya viene con la URL del fondo
 
   const ConversationScreen({
     super.key,
@@ -35,7 +36,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
   double _fontSizeBurbuja = 16.0;
   double _scaleStartFontSize = 16.0;
 
-  // 🔥 1. NUEVAS VARIABLES DE ESTADO PARA EL NOMBRE
   String? _contactName;
   bool _isLoadingName = false;
 
@@ -44,24 +44,42 @@ class _ConversationScreenState extends State<ConversationScreen> {
     super.initState();
     _cargarPreferenciaTamano();
 
-    // 🔥 2. CONTROLAR SI EL NOMBRE YA VENÍA O SI HAY QUE BUSCARLO (Caso notificación)
+    // Si el chatRoom ya viene (desde la lista), usamos su nombre.
+    // Si no (ej. por notificación), lo buscamos.
     if (widget.chatRoom != null) {
-      _contactName = widget.chatRoom?.otherUser?.displayName; 
+      _contactName = widget.chatRoom?.otherUser?.displayName;
     } else {
       _fetchContactDetails();
     }
 
+    // Usamos addPostFrameCallback para asegurarnos de que el BuildContext esté disponible
+    // y para cargar el fondo del chat activo después de que el widget se haya montado.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
         final appState = AppState.of(context, listen: false);
-        final fondoActivo = await SupabaseService().getActiveChatBackground(widget.roomId);
+        // Primero, intentamos obtener el fondo del chat directamente del chatRoom
+        // (que ya fue precargado si venía de ChatListScreen).
+        String? initialBackgroundUrl = widget.chatRoom?.backgroundImageUrl;
 
-        if (fondoActivo != null && mounted) {
-          appState.setChatWallpaper(fondoActivo['url'] as String?);
+        // Si el chatRoom tiene un fondo, lo usamos directamente.
+        // Si no, o si el usuario quiere un fondo persistente, consultamos Supabase.
+        if (initialBackgroundUrl != null && initialBackgroundUrl.isNotEmpty) {
+          appState.setChatWallpaper(initialBackgroundUrl);
+          debugPrint('Fondo inicial establecido desde ChatRoom: $initialBackgroundUrl');
         } else {
-          final fondos = await SupabaseService().getAvailableWallpapers();
-          if (fondos.isNotEmpty && mounted && appState.currentChatWallpaper == null) {
-            appState.setChatWallpaper(fondos.first['url'] as String?);
+          // Si no hay fondo en chatRoom, o si queremos el fondo activo guardado en Supabase,
+          // lo consultamos. Este es el comportamiento existente para fondos persistentes.
+          final fondoActivo = await SupabaseService().getActiveChatBackground(widget.roomId);
+          if (fondoActivo != null && mounted) {
+            appState.setChatWallpaper(fondoActivo['url'] as String?);
+            debugPrint('Fondo activo establecido desde Supabase: ${fondoActivo['url']}');
+          } else {
+            // Si aún no hay fondo, establece uno por defecto si hay disponibles
+            final fondos = await SupabaseService().getAvailableWallpapers();
+            if (fondos.isNotEmpty && mounted && appState.currentChatWallpaper == null) {
+              appState.setChatWallpaper(fondos.first['url'] as String?);
+              debugPrint('Fondo por defecto establecido: ${fondos.first['url']}');
+            }
           }
         }
       }
@@ -75,21 +93,19 @@ class _ConversationScreenState extends State<ConversationScreen> {
     super.dispose();
   }
 
-  // 🔥 3. NUEVA FUNCIÓN INYECTADA PARA IR A BUSCAR EL NOMBRE A SUPABASE
   Future<void> _fetchContactDetails() async {
     if (!mounted) return;
     setState(() => _isLoadingName = true);
-    
+
     try {
       final supabase = Supabase.instance.client;
       final currentUserId = supabase.auth.currentUser?.id;
 
       if (currentUserId == null) throw Exception("Usuario no autenticado");
 
-      // Consultamos tu tabla room_members y extraemos el campo 'nombre' del perfil del otro usuario
       final data = await supabase
           .from('room_members')
-          .select('profiles:user_id(nombre)') 
+          .select('profiles:user_id(nombre)')
           .eq('room_id', widget.roomId)
           .neq('user_id', currentUserId)
           .maybeSingle();
@@ -99,7 +115,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
           if (data != null && data['profiles'] != null) {
             _contactName = data['profiles']['nombre'] ?? 'Usuario';
           } else {
-            _contactName = "Chat"; 
+            _contactName = "Chat";
           }
           _isLoadingName = false;
         });
@@ -108,7 +124,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
       debugPrint('Error al traer datos del contacto de Supabase: $e');
       if (mounted) {
         setState(() {
-          _contactName = "Chat"; 
+          _contactName = "Chat";
           _isLoadingName = false;
         });
       }
@@ -129,9 +145,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
   }
 
-  // ... (El resto de tu código de _guardarPreferenciaTamano, _sendKeyboardGif, etc., sigue exactamente igual abajo)
-
-
   Future<void> _guardarPreferenciaTamano(double nuevoTamano) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -141,16 +154,12 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
   }
 
-  // <--- TU FUNCIÓN PARA ENVIAR GIFS DEL TECLADO (INTEGRADA AQUÍ) --->
   Future<void> _sendKeyboardGif(KeyboardInsertedContent contenido) async {
     if (!mounted) return;
 
     try {
-      // 1. Generamos un nombre único para el archivo GIF
       final String nombreArchivo = 'gif_${DateTime.now().millisecondsSinceEpoch}.gif';
 
-      // 2. Subimos los bytes puros (contenido.data) a tu storage 'temporary_media'
-      // Flutter extrae automáticamente los datos del teclado en la propiedad .data
       await Supabase.instance.client.storage
           .from('temporary_media')
           .uploadBinary(
@@ -158,32 +167,26 @@ class _ConversationScreenState extends State<ConversationScreen> {
             contenido.data!,
           );
 
-      // 3. Obtenemos la URL pública final de tu Supabase Storage
       final String urlPublicaFinal = Supabase.instance.client.storage
           .from('temporary_media')
           .getPublicUrl('gifs/$nombreArchivo');
 
-      // 4. Enviamos el mensaje usando exactamente tu misma lógica
       await SupabaseService().sendMessage(
         widget.roomId,
-        urlPublicaFinal, // <--- Enviamos tu nueva URL de Supabase
-        type: 'gif', // <--- Mantiene tu tipo 'gif'
+        urlPublicaFinal,
+        type: 'gif',
       );
-      // Opcional: Si el usuario tenía texto en el campo antes de insertar el GIF, lo borramos.
       _messageController.clear();
     } catch (error) {
-      print("Error al procesar o subir el GIF del teclado: $error");
+      debugPrint("Error al procesar o subir el GIF del teclado: $error");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("No se pudo enviar el GIF del teclado")),
+          const SnackBar(content: Text("No se pudo enviar el GIF del teclado")),
         );
       }
     }
   }
-  // <--- FIN DE LA FUNCIÓN _sendKeyboardGif --->
 
-
-  // Función para descargar archivos reales y guardarlos en la galería de Android
   Future<void> _downloadMediaFile(String url, String type) async {
     HapticFeedback.lightImpact();
 
@@ -234,7 +237,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
       final dio = Dio();
       final tempDir = await getTemporaryDirectory();
-      // <--- Modificación: Añadir 'gif' a la lógica de extensión --->
       final extension = type.toLowerCase() == 'video' ? 'mp4' : (type.toLowerCase() == 'gif' ? 'gif' : 'jpg');
       final tempPath = '${tempDir.path}/comoteva_${DateTime.now().millisecondsSinceEpoch}.$extension';
 
@@ -257,10 +259,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
         },
       );
 
-      // Gal.putVideo y Gal.putImage se encargarán del tipo de archivo
       if (type.toLowerCase() == 'video') {
         await Gal.putVideo(tempPath);
-      } else { // Esto cubrirá 'image' y 'gif'
+      } else {
         await Gal.putImage(tempPath);
       }
 
@@ -292,13 +293,12 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
   }
 
-  // Menú de opciones rápidas (Un solo toque): Info, Reenviar, Editar, Eliminar, etc.
   void _onMessageTap(ChatMessage message) {
     final isMe = message.senderId == SupabaseService().currentUserId;
     final isVideo = message.messageType == 'video';
-    final isImage = message.messageType == 'image'; // <--- Modificación
-    final isGif = message.messageType == 'gif'; // <--- NUEVO
-    final isMedia = isImage || isVideo || isGif; // <--- Modificación
+    final isImage = message.messageType == 'image';
+    final isGif = message.messageType == 'gif';
+    final isMedia = isImage || isVideo || isGif;
     final theme = Theme.of(context);
 
     List<Widget> options = [
@@ -318,7 +318,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Mensaje copiado para reenviar')),
           );
-          // Aquí iría la lógica para copiar el mensaje y permitir reenviarlo
         },
       ),
     ];
@@ -327,25 +326,22 @@ class _ConversationScreenState extends State<ConversationScreen> {
       options.add(
         ListTile(
           leading: Icon(Icons.fullscreen, color: theme.primaryColor),
-          // <--- Modificación: Título dinámico para Ver GIF/Video/Imagen --->
           title: Text(isVideo ? 'Ver Video' : (isGif ? 'Ver GIF' : 'Ver Imagen')),
           onTap: () {
-            Navigator.pop(context); // Cierra el bottom sheet
+            Navigator.pop(context);
             Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => MediaPreviewScreen(
-                  message: message, // Pasamos el objeto message completo
+                  message: message,
                   onDownload: _downloadMediaFile,
                   onDelete: (messageId) async {
-                    // Este callback se ejecuta cuando el botón de eliminar se presiona en MediaPreviewScreen
                     await SupabaseService().deleteMessage(messageId);
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('Mensaje eliminado.')),
                       );
                     }
-                    // La MediaPreviewScreen se encargará de hacer pop ella misma.
                   },
                 ),
               ),
@@ -359,7 +355,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
           title: const Text('Descargar a la galería'),
           onTap: () {
             Navigator.pop(context);
-            // <--- Modificación: Pasar 'GIF' como tipo para la descarga --->
             _downloadMediaFile(message.content, isVideo ? 'Video' : (isGif ? 'GIF' : 'Imagen'));
           },
         ),
@@ -377,7 +372,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
       );
     }
 
-    // Opción de eliminar (solo si el mensaje es del usuario actual)
     if (isMe) {
       options.add(
         ListTile(
@@ -407,7 +401,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
-  // Menú de Reacciones con Emojis (Toque sostenido)
   void _onMessageLongPress(ChatMessage message) {
     HapticFeedback.mediumImpact();
     final listaEmojis = ['👍', '🧉', '😂', '🤔', '😎', '🤭'];
@@ -433,7 +426,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
-  // Cuadro de diálogo para editar texto e impactar en Supabase
   void _showEditDialog(ChatMessage message) {
     final editController = TextEditingController(text: message.content);
     showDialog(
@@ -463,7 +455,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
-  // Ventana informativa con los metadatos reales del mensaje
   void _showMsgInfo(ChatMessage message) {
     final localTime = message.createdAt.toLocal();
     showDialog(
@@ -491,7 +482,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
-
   @override
   Widget build(BuildContext context) {
     final appState = AppState.of(context);
@@ -499,12 +489,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        // 🔥 CAMBIO AQUÍ: Si está buscando en Supabase muestra un circulito sutil,
-        // si no, muestra el nombre recuperado de Supabase o el de la navegación normal.
-        title: _isLoadingName 
+        title: _isLoadingName
             ? const SizedBox(
-                width: 20, 
-                height: 20, 
+                width: 20,
+                height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blue),
               )
             : Text(
@@ -571,6 +559,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                           border: Border.all(color: theme.dividerColor),
                                           image: wpUrl.isNotEmpty
                                               ? DecorationImage(
+                                                  // <--- AQUI SE USARA NetworkImage (normal), ya que esto es para seleccionar nuevos fondos ---
+                                                  // Estos no están precargados desde la ChatListScreen
                                                   image: NetworkImage(wpUrl),
                                                   fit: BoxFit.cover,
                                                 )
@@ -610,7 +600,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
         ],
       ),
 
-      // GestureDetector Maestro: Controla los gestos de pinza en la pantalla de chat
       body: GestureDetector(
         onScaleStart: (details) {
           _scaleStartFontSize = _fontSizeBurbuja;
@@ -630,7 +619,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
               Container(
                 decoration: BoxDecoration(
                   image: DecorationImage(
-                    image: NetworkImage(appState.currentChatWallpaper!),
+                    image: CachedNetworkImageProvider(appState.currentChatWallpaper!), // <--- ¡CAMBIO AQUI!
                     fit: BoxFit.cover,
                   ),
                 ),
@@ -654,8 +643,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
                           }
                           return false;
                         },
-
-
                         child: ListView.builder(
                           controller: _scrollController,
                           physics: const AlwaysScrollableScrollPhysics(
@@ -668,9 +655,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
                             final message = messages![index];
                             final isMe = message.senderId == SupabaseService().currentUserId;
                             final isVideo = message.messageType == 'video';
-                            final isImage = message.messageType == 'image'; // <--- Modificación
-                            final isGif = message.messageType == 'gif'; // <--- NUEVO
-                            final isMedia = isImage || isVideo || isGif; // <--- Modificación
+                            final isImage = message.messageType == 'image';
+                            final isGif = message.messageType == 'gif';
+                            final isMedia = isImage || isVideo || isGif;
                             final localTime = message.createdAt.toLocal();
                             final tieneReaccion = message.reaction != null && message.reaction!.isNotEmpty;
                             final esLeido = message.isRead ?? false;
@@ -679,7 +666,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
                               alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                               child: GestureDetector(
                                 onTap: () {
-                                  // Ahora _onMessageTap gestiona todas las interacciones, incluyendo la navegación a MediaPreviewScreen
                                   _onMessageTap(message);
                                 },
                                 onLongPress: () => _onMessageLongPress(message),
@@ -698,11 +684,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                         crossAxisAlignment: CrossAxisAlignment.end,
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          // <--- Modificación: Mostrar GIFs e Imágenes de la misma forma --->
                                           if (isImage || isGif)
                                             ClipRRect(
                                               borderRadius: BorderRadius.circular(14),
-                                              child: Image.network(message.content, fit: BoxFit.cover),
+                                              // Aquí también puedes usar CachedNetworkImage si deseas para las miniaturas de imágenes/GIFs dentro del chat,
+                                              // aunque el precargado era específicamente para el *fondo*.
+                                              child: CachedNetworkImage( // <--- Opcional: Usar CachedNetworkImage aquí para mensajes de imagen/GIF
+                                                imageUrl: message.content,
+                                                fit: BoxFit.cover,
+                                                placeholder: (context, url) => const CircularProgressIndicator(),
+                                                errorWidget: (context, url, error) => const Icon(Icons.error),
+                                              ),
                                             ),
                                           if (isVideo)
                                             Container(
@@ -715,7 +707,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                                 child: Icon(Icons.video_library, color: Colors.white, size: 50),
                                               ),
                                             ),
-                                          // <--- Modificación: Ahora !isMedia solo aplica a mensajes de texto --->
                                           if (!isMedia)
                                             AnimatedDefaultTextStyle(
                                               duration: const Duration(milliseconds: 100),
@@ -752,19 +743,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                     ),
                                     if (tieneReaccion)
                                       Positioned(
-                                        // Posicionamiento dinámico basado en el tamaño de la letra
                                         bottom: -(_fontSizeBurbuja * 0.4),
                                         right: isMe ? null : 12,
                                         left: isMe ? 12 : null,
                                         child: Container(
-                                          // Espaciado interno que escala con tu gesto de pinza
                                           padding: EdgeInsets.symmetric(
                                             horizontal: _fontSizeBurbuja * 0.45,
                                             vertical: _fontSizeBurbuja * 0.15,
                                           ),
                                           decoration: BoxDecoration(
                                             color: theme.colorScheme.surfaceVariant ?? Colors.grey,
-                                            // Redondeado adaptativo para mantener la forma de cápsula
                                             borderRadius: BorderRadius.circular(_fontSizeBurbuja * 0.7),
                                             boxShadow: const [
                                               BoxShadow(
@@ -777,7 +765,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                           child: Text(
                                             message.reaction!,
                                             style: TextStyle(
-                                              // Tamaño base grande que escala dinámicamente (+2.0 sobre el texto)
                                               fontSize: _fontSizeBurbuja + 2.0,
                                             ),
                                           ),
@@ -802,13 +789,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
-
-  // Barra inferior premium para adjuntar multimedia, escribir y enviar mensajes
   Widget _buildChatBar() {
     final theme = Theme.of(context);
     final picker = ImagePicker();
 
-    // Lógica para capturar o seleccionar archivos y mandarlos a Supabase
     Future<void> _adjuntarMultimedia(ImageSource source, String type) async {
       try {
         final XFile? file = type == 'video'
@@ -836,7 +820,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
       }
     }
 
-    // Acción unificada para el botón de enviar
     void _procesarEnvio() {
       final texto = _messageController.text.trim();
       if (texto.isNotEmpty) {
@@ -852,7 +835,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
         top: false,
         child: Row(
           children: [
-            // Botón "+" para abrir el menú inferior multimedia
             IconButton(
               icon: Icon(Icons.add, color: theme.primaryColor, size: 26),
               onPressed: () {
@@ -895,7 +877,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 );
               },
             ),
-            // Campo de texto modular y auto-expandible
             Expanded(
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -914,19 +895,16 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     isDense: true,
                     contentPadding: EdgeInsets.symmetric(vertical: 10),
                   ),
-                  // <--- AQUÍ SE INTEGRA LA CONFIGURACIÓN PARA GIFS DEL TECLADO --->
                   contentInsertionConfiguration: ContentInsertionConfiguration(
                     allowedMimeTypes: const <String>['image/gif'],
                     onContentInserted: (KeyboardInsertedContent content) {
                       _sendKeyboardGif(content);
                     },
                   ),
-                  // <----------------------------------------------------------------->
                 ),
               ),
             ),
             const SizedBox(width: 4),
-            // Botón nativo de flecha de envío
             IconButton(
               icon: Icon(Icons.send, color: theme.primaryColor),
               onPressed: _procesarEnvio,
@@ -936,30 +914,24 @@ class _ConversationScreenState extends State<ConversationScreen> {
       ),
     );
   }
-} // <--- AQUÍ TERMINA ESTRUCTURALMENTE LA CLASE PRINCIPAL _ConversationScreenState
+}
 
-
-// =========================================================================
-// CLASE INDEPENDIENTE: Previsualización de imágenes y videos full-screen
-// Colocar al final del archivo, fuera de _ConversationScreenState
-// =========================================================================
 class MediaPreviewScreen extends StatelessWidget {
-  final ChatMessage message; // Cambiado para recibir el objeto ChatMessage completo
+  final ChatMessage message;
   final Future<void> Function(String, String) onDownload;
-  final Future<void> Function(String) onDelete; // Nuevo callback para eliminar
+  final Future<void> Function(String) onDelete;
 
   const MediaPreviewScreen({
     super.key,
-    required this.message, // Actualizado
+    required this.message,
     required this.onDownload,
-    required this.onDelete, // Nuevo
+    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
     final isVideo = message.messageType.toLowerCase() == 'video';
-    final isGif = message.messageType.toLowerCase() == 'gif'; // <--- NUEVO
-    // Determinar si el mensaje es del usuario actual para mostrar el botón de eliminar
+    final isGif = message.messageType.toLowerCase() == 'gif';
     final isMe = message.senderId == SupabaseService().currentUserId;
 
     return Scaffold(
@@ -968,23 +940,19 @@ class MediaPreviewScreen extends StatelessWidget {
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Text(
-          // <--- Modificación: Título dinámico para GIF/Video/Imagen --->
           isVideo ? 'Video' : (isGif ? 'GIF' : 'Imagen'),
           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(
             icon: const Icon(Icons.download, size: 26),
-            // <--- Modificación: Pasar 'GIF' como tipo para la descarga --->
             onPressed: () => onDownload(message.content, isVideo ? 'Video' : (isGif ? 'GIF' : 'Imagen')),
             tooltip: 'Descargar a la galería',
           ),
-          // Botón de eliminar, visible solo si el mensaje es del usuario actual
           if (isMe)
             IconButton(
               icon: const Icon(Icons.delete_outline, size: 26, color: Colors.redAccent),
               onPressed: () async {
-                // Confirmación antes de eliminar
                 final confirmDelete = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
@@ -1003,8 +971,8 @@ class MediaPreviewScreen extends StatelessWidget {
                   ),
                 );
                 if (confirmDelete == true) {
-                  onDelete(message.id); // Llama al callback para eliminar el mensaje
-                  Navigator.of(context).pop(); // Cierra la pantalla de previsualización
+                  onDelete(message.id);
+                  Navigator.of(context).pop();
                 }
               },
               tooltip: 'Eliminar para todos',
@@ -1039,24 +1007,21 @@ class MediaPreviewScreen extends StatelessWidget {
                 ],
               )
             : InteractiveViewer(
-                maxScale: 4.0, // Permite al usuario hacer zoom con dos dedos en la foto grande
-                child: Image.network(
-                  message.content, // Usa message.content para cargar la imagen o GIF
+                maxScale: 4.0,
+                child: CachedNetworkImage( // <--- Opcional: Usar CachedNetworkImage aquí para la previsualización de imagen/GIF
+                  imageUrl: message.content,
                   fit: BoxFit.contain,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) return child;
-                    return const Center(
-                      child: CircularProgressIndicator(color: Colors.white),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
+                  placeholder: (context, url) => const Center(
+                    child: CircularProgressIndicator(color: Colors.white),
+                  ),
+                  errorWidget: (context, url, error) {
                     return const Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.broken_image, color: Colors.white38, size: 48),
                         SizedBox(height: 12),
                         Text(
-                          'No se pudo cargar el medio', // Texto genérico para imagen/GIF
+                          'No se pudo cargar el medio',
                           style: TextStyle(color: Colors.white38),
                         ),
                       ],

@@ -1,3 +1,5 @@
+// chat_list_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:nowa_runtime/nowa_runtime.dart';
 import 'package:comoteva/globals/app_state.dart';
@@ -9,6 +11,7 @@ import 'package:comoteva/models/chat_room.dart';
 import 'package:comoteva/app_theme.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart'; // <--- NUEVA DEPENDENCIA: Añadido para la precarga
 
 @NowaGenerated()
 class ChatListScreen extends StatefulWidget {
@@ -23,6 +26,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Stream<List<ChatRoom>>? _roomsStream;
   late final Future<UserProfile?> _profileFuture;
   late final String? _currentUserId;
+  // Conjunto para almacenar las URLs de las imágenes que ya se han intentado precargar.
+  // Esto evita llamadas redundantes a precacheImage si el StreamBuilder se reconstruye.
+  final Set<String> _precachedImageUrls = {};
 
   @override
   void initState() {
@@ -33,11 +39,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   void _inicializarStream() {
+    // La lógica de precarga se integrará dentro del StreamBuilder una vez que los datos estén disponibles.
+    // Esto asegura que tengamos el BuildContext y los datos de las salas al día.
     _roomsStream = SupabaseService().getMyRoomsStream();
   }
 
   void _confirmarEliminacionChat(BuildContext context, ChatRoom room) {
-    HapticFeedback.mediumImpact(); 
+    HapticFeedback.mediumImpact();
     final theme = Theme.of(context);
     final nombreContacto = room.otherUser?.displayName ?? 'este usuario';
 
@@ -86,7 +94,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
             ),
             onPressed: () async {
               Navigator.pop(context);
-              await SupabaseService().deleteRoom(room.id); 
+              await SupabaseService().deleteRoom(room.id);
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Conversación eliminada con éxito')),
@@ -98,9 +106,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
       ),
     );
   }
-  
-  
-    @override
+
+  @override
   Widget build(BuildContext context) {
     final appState = AppState.of(context);
     final theme = Theme.of(context);
@@ -112,8 +119,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
           debugPrint('Forzando reinicialización manual del Stream de salas...');
           setState(() {
             _inicializarStream();
+            _precachedImageUrls.clear(); // Limpiar el conjunto de URLs precargadas en el refresco
           });
-          await Future.delayed(const Duration(milliseconds: 800)); 
+          await Future.delayed(const Duration(milliseconds: 800));
         },
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(
@@ -187,9 +195,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
               ],
             ),
-            
-            
-                        StreamBuilder<List<ChatRoom>>(
+            StreamBuilder<List<ChatRoom>>(
               stream: _roomsStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
@@ -208,8 +214,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     ),
                   );
                 }
-                
+
                 final rooms = snapshot.data ?? [];
+
+                // --- NUEVA LÓGICA: Pre-cargar imágenes de fondo ---
+                // Solo precargamos si hay salas y el widget sigue montado.
+                // Esto se ejecuta cada vez que el stream emite nuevos datos,
+                // pero `_precachedImageUrls` evita precargas redundantes para la misma URL.
+                if (rooms.isNotEmpty && mounted) {
+                  _precacheChatBackgrounds(rooms, context);
+                }
+                // --- FIN NUEVA LÓGICA ---
 
                 if (rooms.isEmpty) {
                   return SliverFillRemaining(
@@ -241,6 +256,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     final room = rooms[index];
                     final otherUser = room.otherUser;
                     return ListTile(
+                      // Al hacer tap, ya se pasa el objeto 'room' completo como 'extra',
+                      // lo cual es ideal para que ConversationScreen acceda a backgroundImageUrl.
                       onTap: () => context.push('/chat/${room.id}', extra: room),
                       onLongPress: () => _confirmarEliminacionChat(context, room),
                       contentPadding: const EdgeInsets.symmetric(
@@ -311,10 +328,39 @@ class _ChatListScreenState extends State<ChatListScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/profile'),
+        onPressed: () => context.push('/profile'), // Revisa si esto debería ir al perfil o escanear QR
         backgroundColor: theme.primaryColor,
         child: const Icon(Icons.qr_code_scanner, color: Colors.white),
       ),
     );
+  }
+
+  // --- Método para pre-cargar los fondos de chat ---
+  void _precacheChatBackgrounds(List<ChatRoom> rooms, BuildContext context) {
+    for (var room in rooms) {
+      // --- IMPORTANTE: Asumo que tu modelo 'ChatRoom' tiene un campo 'backgroundImageUrl' ---
+      // Si no es así, DEBERÁS añadir 'String? backgroundImageUrl;' a tu clase ChatRoom
+      // y asegurarte de que tu SupabaseService lo obtenga y lo incluya en la creación del objeto ChatRoom.
+      final String? backgroundUrl = room.backgroundImageUrl;
+
+      if (backgroundUrl != null && backgroundUrl.isNotEmpty && !_precachedImageUrls.contains(backgroundUrl)) {
+        try {
+          final ImageProvider imageProvider = CachedNetworkImageProvider(backgroundUrl);
+          precacheImage(imageProvider, context)
+            .then((_) {
+              if (mounted) { // Asegura que el widget sigue montado antes de actualizar el estado
+                _precachedImageUrls.add(backgroundUrl);
+                // Si quieres ver las precargas, puedes descomentar la siguiente línea:
+                // debugPrint('Precargada imagen para chat ID ${room.id} (${room.otherUser?.displayName ?? 'Desconocido'}): $backgroundUrl');
+              }
+            })
+            .catchError((error) {
+              debugPrint('Error precargando imagen para chat ID ${room.id} ($backgroundUrl): $error');
+            });
+        } catch (e) {
+          debugPrint('Error al crear CachedNetworkImageProvider para URL $backgroundUrl: $e');
+        }
+      }
+    }
   }
 }

@@ -10,6 +10,7 @@ class ChatRoom {
     this.isGroup = false,
     this.otherUser,
     this.lastMessage,
+    this.backgroundImageUrl,
   });
 
   factory ChatRoom.fromJson(
@@ -23,6 +24,7 @@ class ChatRoom {
       isGroup: (json['is_group'] as bool?) ?? false,
       otherUser: otherUser,
       lastMessage: lastMessage,
+      backgroundImageUrl: json['background_image_url'] as String?, // Asegúrate de leerlo de Supabase
     );
   }
 
@@ -35,12 +37,15 @@ class ChatRoom {
   final UserProfile? otherUser;
 
   final ChatMessage? lastMessage;
+  
+  final String? backgroundImageUrl;
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
       'created_at': createdAt.toIso8601String(),
       'is_group': isGroup,
+      'background_image_url': backgroundImageUrl,
     };
   }
 }
