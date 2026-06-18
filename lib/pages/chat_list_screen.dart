@@ -258,7 +258,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     return ListTile(
                       // Al hacer tap, ya se pasa el objeto 'room' completo como 'extra',
                       // lo cual es ideal para que ConversationScreen acceda a backgroundImageUrl.
-                      onTap: () => context.push('/chat/${room.id}', extra: room),
+                      onTap: () async {
+  // 1. Abre el chat y espera a que el usuario regrese
+  await context.push('/chat/${room.id}', extra: room);
+  
+  // 2. Al regresar, refrescamos el Stream automáticamente sin que el usuario estire la pantalla
+  debugPrint('Regresó del chat. Actualizando estado de lectura...');
+  setState(() {
+    _inicializarStream();
+  });
+},
                       onLongPress: () => _confirmarEliminacionChat(context, room),
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 20,
