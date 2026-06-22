@@ -32,6 +32,7 @@ class ConversationScreen extends StatefulWidget {
 class _ConversationScreenState extends State<ConversationScreen> {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _messageController = TextEditingController();
+  static const Color amberPremium = Color(0xFFD4AF37);
 
   static const String _fontStorageKey = 'chat_bubble_font_size';
   double _fontSizeBurbuja = 16.0;
@@ -646,105 +647,106 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
   // NUEVO: Widget para la barra de mensaje fijado
   Widget _buildPinnedMessageBanner() {
-    if (_pinnedMessage == null) return const SizedBox.shrink();
+  if (_pinnedMessage == null) return const SizedBox.shrink();
 
-    final theme = Theme.of(context);
-    String pinnedSenderName;
-    if (_pinnedMessage!.senderId == SupabaseService().currentUserId) {
-      pinnedSenderName = 'Tú';
-    } else if (_pinnedMessage!.senderId == widget.chatRoom?.otherUser?.id) {
-      pinnedSenderName = _contactName ?? 'Usuario';
-    } else {
-      pinnedSenderName = 'Usuario';
-    }
+  final theme = Theme.of(context);
+  // Definimos el color ámbar premium adaptado
+  const Color premiumAmber = Color(0xFFD4AF37); 
 
-    return GestureDetector(
-      onTap: () {
-        // Al tocar el banner, desplázate al mensaje fijado
-        final key = _messageKeys[_pinnedMessage!.id];
-        if (key != null && key.currentContext != null) {
-          Scrollable.ensureVisible(
-            key.currentContext!,
-            alignment: 0.5, // Centrar el mensaje en la vista
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
+  String pinnedSenderName;
+  if (_pinnedMessage!.senderId == SupabaseService().currentUserId) {
+    pinnedSenderName = 'Tú';
+  } else if (_pinnedMessage!.senderId == widget.chatRoom?.otherUser?.id) {
+    pinnedSenderName = _contactName ?? 'Usuario';
+  } else {
+    pinnedSenderName = 'Usuario';
+  }
+
+  return GestureDetector(
+    onTap: () {
+      final key = _messageKeys[_pinnedMessage!.id];
+      if (key != null && key.currentContext != null) {
+        Scrollable.ensureVisible(
+          key.currentContext!,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeInOut,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Mensaje fijado no visible, desplazando...')),
           );
-        } else {
-          // Si el mensaje no está cargado en la vista actual, desplázate al inicio/fin
-          // o implementa una lógica para cargar el mensaje si está muy lejos.
-          // Para esta implementación básica, vamos a desplazar al inicio de la lista.
-          // En un caso real, si el mensaje está muy arriba o muy abajo,
-          // necesitarías cargar más mensajes para que aparezca.
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent, // Scroll al inicio (mensajes más viejos)
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Mensaje fijado no visible, desplazando...')),
-            );
-          }
         }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceVariant, // Color de fondo para el banner fijado
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.amber, width: 1.5), // Borde resaltado para el pin
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.push_pin, color: Colors.amber, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Mensaje fijado de ${pinnedSenderName}',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
+      }
+    },
+    // ClipRRect es necesario para que el desenfoque no se salga de las esquinas redondeadas
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(16), // Bordes un poco más amplios, más modernos
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), // Aplica el desenfoque al fondo dinámico
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          margin: const EdgeInsets.only(bottom: 8),
+          decoration: BoxDecoration(
+            // Fondo translúcido oscuro para que contraste con cualquier piedra, madera o dibujo
+            color: Colors.black.withOpacity(0.4), 
+            borderRadius: BorderRadius.circular(16),
+            // Borde ámbar premium ultra fino (1.0 o 0.8 se ve más delicado que 1.5)
+            border: Border.all(color: premiumAmber.withOpacity(0.8), width: 1.0),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.push_pin, color: premiumAmber, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Mensaje fijado de $pinnedSenderName',
+                      style: const TextStyle(
+                        color: premiumAmber, // El remitente en ámbar se ve mucho más premium
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                        letterSpacing: 0.5,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  _buildContentPreview(
-                    _pinnedMessage!.content,
-                    _pinnedMessage!.messageType,
-                    theme.colorScheme.onSurface.withOpacity(0.8),
-                    14.0, // Tamaño de fuente para la vista previa
-                  ),
-                ],
+                    const SizedBox(height: 2),
+                    _buildContentPreview(
+                      _pinnedMessage!.content,
+                      _pinnedMessage!.messageType,
+                      Colors.white.withOpacity(0.9), // Texto blanco limpio sobre el fondo oscuro
+                      13.0,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            IconButton(
-              icon: Icon(Icons.close, color: theme.colorScheme.onSurface.withOpacity(0.6), size: 20),
-              onPressed: () async {
-                HapticFeedback.lightImpact();
-                await SupabaseService().unpinMessage(widget.roomId);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Mensaje desfijado.')),
-                  );
-                }
-              },
-            ),
-          ],
+              IconButton(
+                icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
+                onPressed: () async {
+                  HapticFeedback.lightImpact();
+                  await SupabaseService().unpinMessage(widget.roomId);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Mensaje desfijado.')),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 
   @override
   Widget build(BuildContext context) {
