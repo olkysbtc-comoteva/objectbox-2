@@ -195,6 +195,9 @@ class SupabaseService {
     String roomId,
     String content, {
     String type = 'text',
+    String? replyToMessageId,    // NUEVO: Parámetro para el ID del mensaje respondido
+    String? replyToContent,      // NUEVO: Parámetro para el contenido del mensaje respondido
+    String? replyToSenderId,     // NUEVO: Parámetro para el ID del remitente del mensaje respondido
   }) async {
     final userId = currentUserId;
     if (userId == null) {
@@ -205,6 +208,9 @@ class SupabaseService {
       'sender_id': userId,
       'content': content,
       'message_type': type,
+      'reply_to_message_id': replyToMessageId, // NUEVO: Se envía al insertar
+      'reply_to_content': replyToContent,     // NUEVO: Se envía al insertar
+      'reply_to_sender_id': replyToSenderId,  // NUEVO: Se envía al insertar
     });
   }
 

@@ -11,6 +11,9 @@ class ChatMessage {
     required this.createdAt,
     this.isRead = false,
     this.reaction, // Añadido para soportar los stickers flotantes de emojis
+    this.replyToMessageId,    // NUEVO: ID del mensaje al que se responde
+    this.replyToContent,      // NUEVO: Contenido del mensaje al que se responde
+    this.replyToSenderId,     // NUEVO: ID del remitente del mensaje al que se responde
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
@@ -23,6 +26,9 @@ class ChatMessage {
       createdAt: DateTime.parse(json['created_at'] as String),
       isRead: (json['is_read'] as bool?) ?? false,
       reaction: json['reaction'] as String?, // Mapea la reacción desde Supabase
+      replyToMessageId: json['reply_to_message_id'] as String?, // NUEVO
+      replyToContent: json['reply_to_content'] as String?,     // NUEVO
+      replyToSenderId: json['reply_to_sender_id'] as String?,  // NUEVO
     );
   }
 
@@ -42,6 +48,10 @@ class ChatMessage {
 
   final String? reaction; // Propiedad de lectura para la interfaz de las burbujas
 
+  final String? replyToMessageId;    // NUEVO
+  final String? replyToContent;      // NUEVO
+  final String? replyToSenderId;     // NUEVO
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -52,6 +62,9 @@ class ChatMessage {
       'created_at': createdAt.toIso8601String(),
       'is_read': isRead,
       'reaction': reaction, // Envía el emoji de vuelta si es necesario convertir a JSON
+      'reply_to_message_id': replyToMessageId,    // NUEVO
+      'reply_to_content': replyToContent,      // NUEVO
+      'reply_to_sender_id': replyToSenderId,     // NUEVO
     };
   }
 }

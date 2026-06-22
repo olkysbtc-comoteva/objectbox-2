@@ -12,11 +12,11 @@ import 'package:comoteva/integrations/supabase_service.dart';
 import 'package:comoteva/models/chat_room.dart';
 import 'package:comoteva/models/chat_message.dart';
 import 'package:comoteva/globals/app_state.dart';
-import 'package:cached_network_image/cached_network_image.dart'; // <--- NUEVA DEPENDENCIA: Importamos cached_network_image
+import 'package:cached_network_image/cached_network_image.dart';
 
 class ConversationScreen extends StatefulWidget {
   final String roomId;
-  final ChatRoom? chatRoom; // El ChatRoom ya viene con la URL del fondo
+  final ChatRoom? chatRoom;
 
   const ConversationScreen({
     super.key,
@@ -39,42 +39,33 @@ class _ConversationScreenState extends State<ConversationScreen> {
   String? _contactName;
   bool _isLoadingName = false;
 
+  ChatMessage? _replyingToMessage; // NUEVO: Mensaje al que se está respondiendo
+
   @override
   void initState() {
     super.initState();
     _cargarPreferenciaTamano();
 
-    // Si el chatRoom ya viene (desde la lista), usamos su nombre.
-    // Si no (ej. por notificación), lo buscamos.
     if (widget.chatRoom != null) {
       _contactName = widget.chatRoom?.otherUser?.displayName;
     } else {
       _fetchContactDetails();
     }
 
-    // Usamos addPostFrameCallback para asegurarnos de que el BuildContext esté disponible
-    // y para cargar el fondo del chat activo después de que el widget se haya montado.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
         final appState = AppState.of(context, listen: false);
-        // Primero, intentamos obtener el fondo del chat directamente del chatRoom
-        // (que ya fue precargado si venía de ChatListScreen).
         String? initialBackgroundUrl = widget.chatRoom?.backgroundImageUrl;
 
-        // Si el chatRoom tiene un fondo, lo usamos directamente.
-        // Si no, o si el usuario quiere un fondo persistente, consultamos Supabase.
         if (initialBackgroundUrl != null && initialBackgroundUrl.isNotEmpty) {
           appState.setChatWallpaper(initialBackgroundUrl);
           debugPrint('Fondo inicial establecido desde ChatRoom: $initialBackgroundUrl');
         } else {
-          // Si no hay fondo en chatRoom, o si queremos el fondo activo guardado en Supabase,
-          // lo consultamos. Este es el comportamiento existente para fondos persistentes.
           final fondoActivo = await SupabaseService().getActiveChatBackground(widget.roomId);
           if (fondoActivo != null && mounted) {
             appState.setChatWallpaper(fondoActivo['url'] as String?);
             debugPrint('Fondo activo establecido desde Supabase: ${fondoActivo['url']}');
           } else {
-            // Si aún no hay fondo, establece uno por defecto si hay disponibles
             final fondos = await SupabaseService().getAvailableWallpapers();
             if (fondos.isNotEmpty && mounted && appState.currentChatWallpaper == null) {
               appState.setChatWallpaper(fondos.first['url'] as String?);
@@ -171,12 +162,19 @@ class _ConversationScreenState extends State<ConversationScreen> {
           .from('temporary_media')
           .getPublicUrl('gifs/$nombreArchivo');
 
+      // Modificado para incluir datos de respuesta si existe
       await SupabaseService().sendMessage(
         widget.roomId,
         urlPublicaFinal,
         type: 'gif',
+        replyToMessageId: _replyingToMessage?.id,
+        replyToContent: _replyingToMessage?.content,
+        replyToSenderId: _replyingToMessage?.senderId,
       );
       _messageController.clear();
+      setState(() {
+        _replyingToMessage = null; // Limpiar estado de respuesta
+      });
     } catch (error) {
       debugPrint("Error al procesar o subir el GIF del teclado: $error");
       if (mounted) {
@@ -310,13 +308,20 @@ class _ConversationScreenState extends State<ConversationScreen> {
           _showMsgInfo(message);
         },
       ),
+      // MODIFICADO: Cambiamos "Reenviar mensaje" a "Responder mensaje"
       ListTile(
         leading: const Icon(Icons.reply, color: Colors.green),
-        title: const Text('Reenviar mensaje'),
+        title: const Text('Responder mensaje'),
         onTap: () {
           Navigator.pop(context);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Mensaje copiado para reenviar')),
+          setState(() {
+            _replyingToMessage = message; // Establecer el mensaje al que se responde
+          });
+          // Opcional: Desplazarse al final para mostrar la barra de respuesta
+          _scrollController.animateTo(
+            0.0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
           );
         },
       ),
@@ -470,12 +475,114 @@ class _ConversationScreenState extends State<ConversationScreen> {
             Text('Tipo: ${message.messageType}'),
             const SizedBox(height: 8),
             Text('Estado: ${message.isRead == true ? "Leído" : "Entregado"}'),
+            if (message.replyToMessageId != null) ...[ // NUEVO: Mostrar info de respuesta
+              const SizedBox(height: 8),
+              const Text('Respondiendo a:', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text('  - Contenido: ${message.replyToContent ?? 'N/A'}'),
+              Text('  - Remitente ID: ${message.replyToSenderId ?? 'N/A'}'),
+            ],
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // NUEVO: Widget para la previsualización del mensaje respondido en la barra de entrada
+  Widget _buildReplyPreview() {
+    if (_replyingToMessage == null) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    String replySenderName;
+    if (_replyingToMessage!.senderId == SupabaseService().currentUserId) {
+      replySenderName = 'Tú';
+    } else if (_replyingToMessage!.senderId == widget.chatRoom?.otherUser?.id) {
+      replySenderName = _contactName ?? 'Usuario';
+    } else {
+      replySenderName = 'Usuario'; // Fallback para casos no esperados en 1-a-1
+    }
+
+    // Determinar el contenido a mostrar en la previsualización
+    Widget previewContent;
+    String messageContent = _replyingToMessage!.content;
+    String messageType = _replyingToMessage!.messageType;
+
+    if (messageType == 'image') {
+      previewContent = Row(
+        children: [
+          Icon(Icons.image, size: 18, color: theme.colorScheme.onSurface.withOpacity(0.8)),
+          const SizedBox(width: 4),
+          Text('Imagen', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.8))),
+        ],
+      );
+    } else if (messageType == 'video') {
+      previewContent = Row(
+        children: [
+          Icon(Icons.video_library, size: 18, color: theme.colorScheme.onSurface.withOpacity(0.8)),
+          const SizedBox(width: 4),
+          Text('Video', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.8))),
+        ],
+      );
+    } else if (messageType == 'gif') {
+      previewContent = Row(
+        children: [
+          Icon(Icons.gif_box, size: 18, color: theme.colorScheme.onSurface.withOpacity(0.8)),
+          const SizedBox(width: 4),
+          Text('GIF', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.8))),
+        ],
+      );
+    } else {
+      previewContent = Text(
+        messageContent,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.8)),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withOpacity(0.9),
+        border: Border(left: BorderSide(color: theme.primaryColor, width: 4)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Respondiendo a ${replySenderName}',
+                  style: TextStyle(
+                    color: theme.primaryColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                DefaultTextStyle(
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface.withOpacity(0.8),
+                    fontSize: 14,
+                  ),
+                  child: previewContent,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.close, color: theme.colorScheme.onSurface.withOpacity(0.6)),
+            onPressed: () {
+              setState(() {
+                _replyingToMessage = null; // Limpiar estado de respuesta
+              });
+            },
           ),
         ],
       ),
@@ -559,8 +666,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                           border: Border.all(color: theme.dividerColor),
                                           image: wpUrl.isNotEmpty
                                               ? DecorationImage(
-                                                  // <--- AQUI SE USARA NetworkImage (normal), ya que esto es para seleccionar nuevos fondos ---
-                                                  // Estos no están precargados desde la ChatListScreen
                                                   image: NetworkImage(wpUrl),
                                                   fit: BoxFit.cover,
                                                 )
@@ -619,7 +724,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
               Container(
                 decoration: BoxDecoration(
                   image: DecorationImage(
-                    image: CachedNetworkImageProvider(appState.currentChatWallpaper!), // <--- ¡CAMBIO AQUI!
+                    image: CachedNetworkImageProvider(appState.currentChatWallpaper!),
                     fit: BoxFit.cover,
                   ),
                 ),
@@ -662,6 +767,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
                             final tieneReaccion = message.reaction != null && message.reaction!.isNotEmpty;
                             final esLeido = message.isRead ?? false;
 
+                            // NUEVO: Lógica para el nombre del remitente del mensaje respondido
+                            String? originalReplySenderName;
+                            if (message.replyToSenderId != null) {
+                              if (message.replyToSenderId == SupabaseService().currentUserId) {
+                                originalReplySenderName = 'Tú';
+                              } else if (message.replyToSenderId == widget.chatRoom?.otherUser?.id) {
+                                originalReplySenderName = _contactName ?? 'Usuario';
+                              } else {
+                                originalReplySenderName = 'Usuario'; // Fallback
+                              }
+                            }
+
                             return Align(
                               alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                               child: GestureDetector(
@@ -684,16 +801,56 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                         crossAxisAlignment: CrossAxisAlignment.end,
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
+                                          // NUEVO: Previsualización del mensaje respondido
+                                          if (message.replyToMessageId != null && message.replyToContent != null)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                              margin: const EdgeInsets.only(bottom: 6),
+                                              decoration: BoxDecoration(
+                                                color: isMe
+                                                    ? theme.primaryColor.withOpacity(0.7) // Color más claro para mis respuestas
+                                                    : theme.colorScheme.surface.withOpacity(0.7), // Color más oscuro para respuestas de otros
+                                                borderRadius: BorderRadius.circular(12),
+                                                border: Border(left: BorderSide(color: isMe ? Colors.white70 : theme.primaryColor, width: 3)),
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    originalReplySenderName ?? 'Usuario',
+                                                    style: TextStyle(
+                                                      fontWeight: FontWeight.bold,
+                                                      color: isMe ? Colors.white : theme.primaryColor,
+                                                      fontSize: _fontSizeBurbuja * 0.85,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  _buildReplyContentPreview(
+                                                    message.replyToContent!,
+                                                    isMe ? Colors.white70 : theme.colorScheme.onSurface.withOpacity(0.7),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+
                                           if (isImage || isGif)
                                             ClipRRect(
                                               borderRadius: BorderRadius.circular(14),
-                                              // Aquí también puedes usar CachedNetworkImage si deseas para las miniaturas de imágenes/GIFs dentro del chat,
-                                              // aunque el precargado era específicamente para el *fondo*.
-                                              child: CachedNetworkImage( // <--- Opcional: Usar CachedNetworkImage aquí para mensajes de imagen/GIF
+                                              child: CachedNetworkImage(
                                                 imageUrl: message.content,
                                                 fit: BoxFit.cover,
-                                                placeholder: (context, url) => const CircularProgressIndicator(),
-                                                errorWidget: (context, url, error) => const Icon(Icons.error),
+                                                placeholder: (context, url) => Container(
+                                                  height: 150, // Altura placeholder
+                                                  width: 150,
+                                                  color: Colors.grey[300],
+                                                  child: const Center(child: CircularProgressIndicator()),
+                                                ),
+                                                errorWidget: (context, url, error) => Container(
+                                                  height: 150, // Altura placeholder
+                                                  width: 150,
+                                                  color: Colors.grey[300],
+                                                  child: const Center(child: Icon(Icons.error)),
+                                                ),
                                               ),
                                             ),
                                           if (isVideo)
@@ -780,6 +937,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     },
                   ),
                 ),
+                // NUEVO: Mostrar la previsualización de respuesta si hay un mensaje para responder
+                if (_replyingToMessage != null) _buildReplyPreview(),
                 _buildChatBar(),
               ],
             ),
@@ -787,6 +946,46 @@ class _ConversationScreenState extends State<ConversationScreen> {
         ),
       ),
     );
+  }
+
+  // NUEVO: Helper para mostrar el contenido del mensaje respondido
+  Widget _buildReplyContentPreview(String content, Color textColor) {
+    // Lógica para detectar si el contenido respondido es una imagen/video/gif
+    if (content.startsWith('http') && (content.contains('.jpg') || content.contains('.png'))) {
+      return Row(
+        children: [
+          Icon(Icons.image, size: _fontSizeBurbuja * 0.9, color: textColor),
+          const SizedBox(width: 4),
+          Text('Imagen', style: TextStyle(fontSize: _fontSizeBurbuja * 0.9, color: textColor)),
+        ],
+      );
+    } else if (content.startsWith('http') && content.contains('.gif')) {
+      return Row(
+        children: [
+          Icon(Icons.gif_box, size: _fontSizeBurbuja * 0.9, color: textColor),
+          const SizedBox(width: 4),
+          Text('GIF', style: TextStyle(fontSize: _fontSizeBurbuja * 0.9, color: textColor)),
+        ],
+      );
+    } else if (content.startsWith('http') && content.contains('.mp4')) {
+      return Row(
+        children: [
+          Icon(Icons.video_library, size: _fontSizeBurbuja * 0.9, color: textColor),
+          const SizedBox(width: 4),
+          Text('Video', style: TextStyle(fontSize: _fontSizeBurbuja * 0.9, color: textColor)),
+        ],
+      );
+    } else {
+      return Text(
+        content,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: _fontSizeBurbuja * 0.9,
+          color: textColor,
+        ),
+      );
+    }
   }
 
   Widget _buildChatBar() {
@@ -808,11 +1007,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
           );
 
           if (publicUrl != null) {
+            // Modificado para incluir datos de respuesta si existe
             await SupabaseService().sendMessage(
               widget.roomId,
               publicUrl,
               type: type,
+              replyToMessageId: _replyingToMessage?.id,
+              replyToContent: _replyingToMessage?.content,
+              replyToSenderId: _replyingToMessage?.senderId,
             );
+            setState(() {
+              _replyingToMessage = null; // Limpiar estado de respuesta
+            });
           }
         }
       } catch (e) {
@@ -823,7 +1029,22 @@ class _ConversationScreenState extends State<ConversationScreen> {
     void _procesarEnvio() {
       final texto = _messageController.text.trim();
       if (texto.isNotEmpty) {
-        SupabaseService().sendMessage(widget.roomId, texto);
+        if (_replyingToMessage != null) {
+          // Si hay un mensaje para responder, envía los datos de respuesta
+          SupabaseService().sendMessage(
+            widget.roomId,
+            texto,
+            replyToMessageId: _replyingToMessage!.id,
+            replyToContent: _replyingToMessage!.content,
+            replyToSenderId: _replyingToMessage!.senderId,
+          );
+          setState(() {
+            _replyingToMessage = null; // Limpiar el mensaje al que se responde
+          });
+        } else {
+          // Si no, envía un mensaje normal
+          SupabaseService().sendMessage(widget.roomId, texto);
+        }
         _messageController.clear();
       }
     }
@@ -1008,7 +1229,7 @@ class MediaPreviewScreen extends StatelessWidget {
               )
             : InteractiveViewer(
                 maxScale: 4.0,
-                child: CachedNetworkImage( // <--- Opcional: Usar CachedNetworkImage aquí para la previsualización de imagen/GIF
+                child: CachedNetworkImage(
                   imageUrl: message.content,
                   fit: BoxFit.contain,
                   placeholder: (context, url) => const Center(
