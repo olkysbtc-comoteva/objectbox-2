@@ -1,5 +1,6 @@
 import 'dart:async'; // NUEVO: Importar para StreamSubscription
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
