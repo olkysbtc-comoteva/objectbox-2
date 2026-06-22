@@ -1,3 +1,4 @@
+import 'dart:async'; // NUEVO: Importar para StreamSubscription
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:nowa_runtime/nowa_runtime.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -163,7 +164,7 @@ class SupabaseService {
   }
   
   
-    Stream<List<ChatMessage>> getMessagesStream(String roomId) {
+  Stream<List<ChatMessage>> getMessagesStream(String roomId) {
     // CORRECCIÓN: Envolvemos correctamente en una instancia de Future pura
     return Stream.fromFuture(Future(() async {
       try {
@@ -195,9 +196,9 @@ class SupabaseService {
     String roomId,
     String content, {
     String type = 'text',
-    String? replyToMessageId,    // NUEVO: Parámetro para el ID del mensaje respondido
-    String? replyToContent,      // NUEVO: Parámetro para el contenido del mensaje respondido
-    String? replyToSenderId,     // NUEVO: Parámetro para el ID del remitente del mensaje respondido
+    String? replyToMessageId,    // Parámetro para el ID del mensaje respondido
+    String? replyToContent,      // Parámetro para el contenido del mensaje respondido
+    String? replyToSenderId,     // Parámetro para el ID del remitente del mensaje respondido
   }) async {
     final userId = currentUserId;
     if (userId == null) {
@@ -208,9 +209,9 @@ class SupabaseService {
       'sender_id': userId,
       'content': content,
       'message_type': type,
-      'reply_to_message_id': replyToMessageId, // NUEVO: Se envía al insertar
-      'reply_to_content': replyToContent,     // NUEVO: Se envía al insertar
-      'reply_to_sender_id': replyToSenderId,  // NUEVO: Se envía al insertar
+      'reply_to_message_id': replyToMessageId,
+      'reply_to_content': replyToContent,
+      'reply_to_sender_id': replyToSenderId,
     });
   }
 
@@ -231,6 +232,90 @@ class SupabaseService {
         .eq('room_id', roomId)
         .neq('sender_id', userId)
         .eq('is_read', false);
+  }
+
+  // ===================================================
+  // GESTIÓN DE MENSAJES FIJADOS (PINNED MESSAGES)
+  // ===================================================
+
+  // Obtener el mensaje fijado para una sala
+  Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
+    final userId = currentUserId;
+    if (userId == null) {
+      return Stream.value(null);
+    }
+    
+    // Escucha los cambios en la tabla 'chat_pinned_messages'
+    return client
+        .from('chat_pinned_messages')
+        .stream(primaryKey: ['id']) // 'id' es la PK de chat_pinned_messages
+        .eq('room_id', roomId)
+        .limit(1) // Asumimos un solo mensaje fijado por sala
+        .asyncMap((data) async {
+          if (data.isEmpty) {
+            return null;
+          }
+          final pinnedMessageData = data.first;
+          final messageId = pinnedMessageData['message_id'] as String;
+
+          // Ahora, busca los detalles completos del mensaje original
+          final messageResponse = await client
+              .from('messages')
+              .select()
+              .eq('id', messageId)
+              .single()
+              .catchError((e) {
+                debugPrint('Error al obtener el mensaje fijado: $e');
+                return null;
+              });
+
+          if (messageResponse != null) {
+            return ChatMessage.fromJson(messageResponse as Map<String, dynamic>);
+          }
+          return null;
+        });
+  }
+
+  // Fijar un mensaje en una sala
+  Future<void> pinMessage(String roomId, String messageId) async {
+    final userId = currentUserId;
+    if (userId == null) {
+      throw Exception('Usuario no autenticado para fijar mensaje.');
+    }
+
+    try {
+      // Eliminar cualquier mensaje previamente fijado en esta sala
+      await client
+          .from('chat_pinned_messages')
+          .delete()
+          .eq('room_id', roomId);
+
+      // Insertar el nuevo mensaje fijado
+      await client.from('chat_pinned_messages').insert({
+        'user_id': userId, // El usuario que fijó el mensaje
+        'room_id': roomId,
+        'message_id': messageId,
+        'pinned_at': DateTime.now().toIso8601String(),
+      });
+      debugPrint('Mensaje $messageId fijado con éxito en la sala $roomId');
+    } catch (e) {
+      debugPrint('Error al fijar el mensaje: $e');
+      throw Exception('No se pudo fijar el mensaje.');
+    }
+  }
+
+  // Desfijar un mensaje en una sala
+  Future<void> unpinMessage(String roomId) async {
+    try {
+      await client
+          .from('chat_pinned_messages')
+          .delete()
+          .eq('room_id', roomId);
+      debugPrint('Mensaje desfijado correctamente en la sala $roomId');
+    } catch (e) {
+      debugPrint('Error al desfijar el mensaje: $e');
+      throw Exception('No se pudo desfijar el mensaje.');
+    }
   }
 
   Future<String?> generateDynamicToken() async {
@@ -312,6 +397,8 @@ class SupabaseService {
     try {
       await client.from('room_members').delete().eq('room_id', roomId);
       await client.from('rooms').delete().eq('id', roomId);
+      // Opcional: Desfijar mensajes al eliminar la sala
+      await unpinMessage(roomId); 
       debugPrint('Sala $roomId eliminada correctamente de Supabase.');
     } catch (e) {
       debugPrint('Error al eliminar la sala de chat: $e');
@@ -328,6 +415,11 @@ class SupabaseService {
 
   Future<void> deleteMessage(String messageId) async {
     await client.from('messages').delete().eq('id', messageId);
+    // Opcional: Si el mensaje eliminado es el fijado, desfijarlo automáticamente
+    // Esto podría ser un trigger en Supabase o una lógica aquí.
+    // Para simplificar, asumimos que Supabase handles CASCADE DELETE or similar.
+    // Si no, necesitaríamos comprobar si `messageId` es el `pinnedMessageId`
+    // y llamar a `unpinMessage(roomId)` si lo es.
   }
   
   

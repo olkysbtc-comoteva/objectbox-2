@@ -1,3 +1,4 @@
+import 'dart:async'; // NUEVO: Importar para StreamSubscription
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -39,7 +40,12 @@ class _ConversationScreenState extends State<ConversationScreen> {
   String? _contactName;
   bool _isLoadingName = false;
 
-  ChatMessage? _replyingToMessage; // NUEVO: Mensaje al que se está respondiendo
+  ChatMessage? _replyingToMessage; // Mensaje al que se está respondiendo
+  ChatMessage? _pinnedMessage;     // NUEVO: Mensaje fijado
+  StreamSubscription? _pinnedMessageSubscription; // NUEVO: Suscripción para el mensaje fijado
+
+  // NUEVO: Mapa para almacenar GlobalKeys por message.id para el scroll
+  final Map<String, GlobalKey> _messageKeys = {};
 
   @override
   void initState() {
@@ -51,6 +57,19 @@ class _ConversationScreenState extends State<ConversationScreen> {
     } else {
       _fetchContactDetails();
     }
+
+    // NUEVO: Inicializar suscripción a mensajes fijados
+    _pinnedMessageSubscription = SupabaseService()
+        .getPinnedMessageStream(widget.roomId)
+        .listen((message) {
+      if (mounted) {
+        setState(() {
+          _pinnedMessage = message;
+        });
+      }
+    }, onError: (error) {
+      debugPrint('Error en el stream de mensajes fijados: $error');
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
@@ -81,6 +100,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   void dispose() {
     _scrollController.dispose();
     _messageController.dispose();
+    _pinnedMessageSubscription?.cancel(); // NUEVO: Cancelar suscripción del mensaje fijado
     super.dispose();
   }
 
@@ -308,16 +328,15 @@ class _ConversationScreenState extends State<ConversationScreen> {
           _showMsgInfo(message);
         },
       ),
-      // MODIFICADO: Cambiamos "Reenviar mensaje" a "Responder mensaje"
       ListTile(
         leading: const Icon(Icons.reply, color: Colors.green),
-        title: const Text('Responder mensaje'),
+        title: const Text('Responder mensaje'), // Cambiado de "Reenviar mensaje"
         onTap: () {
           Navigator.pop(context);
           setState(() {
             _replyingToMessage = message; // Establecer el mensaje al que se responde
           });
-          // Opcional: Desplazarse al final para mostrar la barra de respuesta
+          // Desplazarse al final para mostrar la barra de respuesta
           _scrollController.animateTo(
             0.0,
             duration: const Duration(milliseconds: 300),
@@ -326,6 +345,41 @@ class _ConversationScreenState extends State<ConversationScreen> {
         },
       ),
     ];
+
+    // NUEVO: Opciones de fijar/desfijar
+    if (_pinnedMessage?.id == message.id) {
+      options.add(
+        ListTile(
+          leading: const Icon(Icons.push_pin_outlined, color: Colors.red),
+          title: const Text('Desfijar mensaje'),
+          onTap: () async {
+            Navigator.pop(context);
+            await SupabaseService().unpinMessage(widget.roomId);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Mensaje desfijado.')),
+              );
+            }
+          },
+        ),
+      );
+    } else {
+      options.add(
+        ListTile(
+          leading: const Icon(Icons.push_pin, color: Colors.amber),
+          title: const Text('Fijar mensaje'),
+          onTap: () async {
+            Navigator.pop(context);
+            await SupabaseService().pinMessage(widget.roomId, message.id);
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Mensaje fijado.')),
+              );
+            }
+          },
+        ),
+      );
+    }
 
     if (isMedia) {
       options.add(
@@ -475,7 +529,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
             Text('Tipo: ${message.messageType}'),
             const SizedBox(height: 8),
             Text('Estado: ${message.isRead == true ? "Leído" : "Entregado"}'),
-            if (message.replyToMessageId != null) ...[ // NUEVO: Mostrar info de respuesta
+            if (message.replyToMessageId != null) ...[ // Mostrar info de respuesta
               const SizedBox(height: 8),
               const Text('Respondiendo a:', style: TextStyle(fontWeight: FontWeight.bold)),
               Text('  - Contenido: ${message.replyToContent ?? 'N/A'}'),
@@ -493,7 +547,47 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
-  // NUEVO: Widget para la previsualización del mensaje respondido en la barra de entrada
+  // NUEVO: Helper para mostrar el contenido del mensaje respondido/fijado
+  Widget _buildContentPreview(String content, String messageType, Color textColor, double fontSize) {
+    if (content.startsWith('http')) {
+      if (messageType == 'image') {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.image, size: fontSize * 0.9, color: textColor),
+            const SizedBox(width: 4),
+            Text('Imagen', style: TextStyle(fontSize: fontSize * 0.9, color: textColor)),
+          ],
+        );
+      } else if (messageType == 'video') {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.video_library, size: fontSize * 0.9, color: textColor),
+            const SizedBox(width: 4),
+            Text('Video', style: TextStyle(fontSize: fontSize * 0.9, color: textColor)),
+          ],
+        );
+      } else if (messageType == 'gif') {
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.gif_box, size: fontSize * 0.9, color: textColor),
+            const SizedBox(width: 4),
+            Text('GIF', style: TextStyle(fontSize: fontSize * 0.9, color: textColor)),
+          ],
+        );
+      }
+    }
+    return Text(
+      content,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(fontSize: fontSize, color: textColor),
+    );
+  }
+
+  // Widget para la previsualización del mensaje respondido en la barra de entrada
   Widget _buildReplyPreview() {
     if (_replyingToMessage == null) return const SizedBox.shrink();
 
@@ -505,44 +599,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
       replySenderName = _contactName ?? 'Usuario';
     } else {
       replySenderName = 'Usuario'; // Fallback para casos no esperados en 1-a-1
-    }
-
-    // Determinar el contenido a mostrar en la previsualización
-    Widget previewContent;
-    String messageContent = _replyingToMessage!.content;
-    String messageType = _replyingToMessage!.messageType;
-
-    if (messageType == 'image') {
-      previewContent = Row(
-        children: [
-          Icon(Icons.image, size: 18, color: theme.colorScheme.onSurface.withOpacity(0.8)),
-          const SizedBox(width: 4),
-          Text('Imagen', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.8))),
-        ],
-      );
-    } else if (messageType == 'video') {
-      previewContent = Row(
-        children: [
-          Icon(Icons.video_library, size: 18, color: theme.colorScheme.onSurface.withOpacity(0.8)),
-          const SizedBox(width: 4),
-          Text('Video', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.8))),
-        ],
-      );
-    } else if (messageType == 'gif') {
-      previewContent = Row(
-        children: [
-          Icon(Icons.gif_box, size: 18, color: theme.colorScheme.onSurface.withOpacity(0.8)),
-          const SizedBox(width: 4),
-          Text('GIF', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.8))),
-        ],
-      );
-    } else {
-      previewContent = Text(
-        messageContent,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.8)),
-      );
     }
 
     return Container(
@@ -566,12 +622,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                DefaultTextStyle(
-                  style: TextStyle(
-                    color: theme.colorScheme.onSurface.withOpacity(0.8),
-                    fontSize: 14,
-                  ),
-                  child: previewContent,
+                _buildContentPreview(
+                  _replyingToMessage!.content,
+                  _replyingToMessage!.messageType,
+                  theme.colorScheme.onSurface.withOpacity(0.8),
+                  14.0, // Tamaño de fuente para la vista previa
                 ),
               ],
             ),
@@ -585,6 +640,108 @@ class _ConversationScreenState extends State<ConversationScreen> {
             },
           ),
         ],
+      ),
+    );
+  }
+
+  // NUEVO: Widget para la barra de mensaje fijado
+  Widget _buildPinnedMessageBanner() {
+    if (_pinnedMessage == null) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    String pinnedSenderName;
+    if (_pinnedMessage!.senderId == SupabaseService().currentUserId) {
+      pinnedSenderName = 'Tú';
+    } else if (_pinnedMessage!.senderId == widget.chatRoom?.otherUser?.id) {
+      pinnedSenderName = _contactName ?? 'Usuario';
+    } else {
+      pinnedSenderName = 'Usuario';
+    }
+
+    return GestureDetector(
+      onTap: () {
+        // Al tocar el banner, desplázate al mensaje fijado
+        final key = _messageKeys[_pinnedMessage!.id];
+        if (key != null && key.currentContext != null) {
+          Scrollable.ensureVisible(
+            key.currentContext!,
+            alignment: 0.5, // Centrar el mensaje en la vista
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeInOut,
+          );
+        } else {
+          // Si el mensaje no está cargado en la vista actual, desplázate al inicio/fin
+          // o implementa una lógica para cargar el mensaje si está muy lejos.
+          // Para esta implementación básica, vamos a desplazar al inicio de la lista.
+          // En un caso real, si el mensaje está muy arriba o muy abajo,
+          // necesitarías cargar más mensajes para que aparezca.
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent, // Scroll al inicio (mensajes más viejos)
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeInOut,
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Mensaje fijado no visible, desplazando...')),
+            );
+          }
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceVariant, // Color de fondo para el banner fijado
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.amber, width: 1.5), // Borde resaltado para el pin
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.push_pin, color: Colors.amber, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Mensaje fijado de ${pinnedSenderName}',
+                    style: TextStyle(
+                      color: theme.colorScheme.onSurface,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  _buildContentPreview(
+                    _pinnedMessage!.content,
+                    _pinnedMessage!.messageType,
+                    theme.colorScheme.onSurface.withOpacity(0.8),
+                    14.0, // Tamaño de fuente para la vista previa
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: Icon(Icons.close, color: theme.colorScheme.onSurface.withOpacity(0.6), size: 20),
+              onPressed: () async {
+                HapticFeedback.lightImpact();
+                await SupabaseService().unpinMessage(widget.roomId);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Mensaje desfijado.')),
+                  );
+                }
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -731,6 +888,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
               ),
             Column(
               children: [
+                // NUEVO: Banner de mensaje fijado, visible solo si hay un mensaje fijado
+                if (_pinnedMessage != null) _buildPinnedMessageBanner(),
+
                 Expanded(
                   child: StreamBuilder<List<ChatMessage>>(
                     stream: SupabaseService().getMessagesStream(widget.roomId),
@@ -767,7 +927,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
                             final tieneReaccion = message.reaction != null && message.reaction!.isNotEmpty;
                             final esLeido = message.isRead ?? false;
 
-                            // NUEVO: Lógica para el nombre del remitente del mensaje respondido
+                            // Almacenar la GlobalKey para este mensaje
+                            _messageKeys[message.id] = GlobalKey();
+
+                            // Lógica para el nombre del remitente del mensaje respondido
                             String? originalReplySenderName;
                             if (message.replyToSenderId != null) {
                               if (message.replyToSenderId == SupabaseService().currentUserId) {
@@ -780,6 +943,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                             }
 
                             return Align(
+                              key: _messageKeys[message.id], // Asignar la GlobalKey
                               alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                               child: GestureDetector(
                                 onTap: () {
@@ -801,7 +965,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                         crossAxisAlignment: CrossAxisAlignment.end,
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          // NUEVO: Previsualización del mensaje respondido
+                                          // Previsualización del mensaje respondido
                                           if (message.replyToMessageId != null && message.replyToContent != null)
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -825,9 +989,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                                     ),
                                                   ),
                                                   const SizedBox(height: 4),
-                                                  _buildReplyContentPreview(
+                                                  _buildContentPreview(
                                                     message.replyToContent!,
+                                                    message.messageType, // Tipo de mensaje original respondido
                                                     isMe ? Colors.white70 : theme.colorScheme.onSurface.withOpacity(0.7),
+                                                    _fontSizeBurbuja * 0.9,
                                                   ),
                                                 ],
                                               ),
@@ -937,7 +1103,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     },
                   ),
                 ),
-                // NUEVO: Mostrar la previsualización de respuesta si hay un mensaje para responder
+                // Mostrar la previsualización de respuesta si hay un mensaje para responder
                 if (_replyingToMessage != null) _buildReplyPreview(),
                 _buildChatBar(),
               ],
@@ -946,46 +1112,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
         ),
       ),
     );
-  }
-
-  // NUEVO: Helper para mostrar el contenido del mensaje respondido
-  Widget _buildReplyContentPreview(String content, Color textColor) {
-    // Lógica para detectar si el contenido respondido es una imagen/video/gif
-    if (content.startsWith('http') && (content.contains('.jpg') || content.contains('.png'))) {
-      return Row(
-        children: [
-          Icon(Icons.image, size: _fontSizeBurbuja * 0.9, color: textColor),
-          const SizedBox(width: 4),
-          Text('Imagen', style: TextStyle(fontSize: _fontSizeBurbuja * 0.9, color: textColor)),
-        ],
-      );
-    } else if (content.startsWith('http') && content.contains('.gif')) {
-      return Row(
-        children: [
-          Icon(Icons.gif_box, size: _fontSizeBurbuja * 0.9, color: textColor),
-          const SizedBox(width: 4),
-          Text('GIF', style: TextStyle(fontSize: _fontSizeBurbuja * 0.9, color: textColor)),
-        ],
-      );
-    } else if (content.startsWith('http') && content.contains('.mp4')) {
-      return Row(
-        children: [
-          Icon(Icons.video_library, size: _fontSizeBurbuja * 0.9, color: textColor),
-          const SizedBox(width: 4),
-          Text('Video', style: TextStyle(fontSize: _fontSizeBurbuja * 0.9, color: textColor)),
-        ],
-      );
-    } else {
-      return Text(
-        content,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: _fontSizeBurbuja * 0.9,
-          color: textColor,
-        ),
-      );
-    }
   }
 
   Widget _buildChatBar() {
@@ -1007,7 +1133,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
           );
 
           if (publicUrl != null) {
-            // Modificado para incluir datos de respuesta si existe
             await SupabaseService().sendMessage(
               widget.roomId,
               publicUrl,
