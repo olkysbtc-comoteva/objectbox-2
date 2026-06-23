@@ -651,7 +651,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   if (_pinnedMessage == null) return const SizedBox.shrink();
 
   final theme = Theme.of(context);
-  // Definimos el color ámbar premium adaptado
+  // Color de ámbar/oro premium unificado
   const Color premiumAmber = Color(0xFFD4AF37); 
 
   String pinnedSenderName;
@@ -663,90 +663,97 @@ class _ConversationScreenState extends State<ConversationScreen> {
     pinnedSenderName = 'Usuario';
   }
 
-  return GestureDetector(
-    onTap: () {
-      final key = _messageKeys[_pinnedMessage!.id];
-      if (key != null && key.currentContext != null) {
-        Scrollable.ensureVisible(
-          key.currentContext!,
-          alignment: 0.5,
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      } else {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Mensaje fijado no visible, desplazando...')),
+  return ClipRect(
+    child: GestureDetector(
+      onTap: () {
+        final key = _messageKeys[_pinnedMessage!.id];
+        if (key != null && key.currentContext != null) {
+          Scrollable.ensureVisible(
+            key.currentContext!,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeInOut,
           );
+        } else {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeInOut,
+          );
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Mensaje fijado no visible, desplazando...')),
+            );
+          }
         }
-      }
-    },
-    // ClipRRect es necesario para que el desenfoque no se salga de las esquinas redondeadas
-    child: ClipRect(
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16), 
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), 
-          child: Container(
-            // Agregamos los márgenes laterales que sugerimos antes para que flote bien
-            margin: const EdgeInsets.only(left: 12, right: 12, bottom: 8, top: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.4), 
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: premiumAmber.withOpacity(0.8), width: 1.0),
-            ),
-            child: Row(
-            children: [
-              const Icon(Icons.push_pin, color: premiumAmber, size: 18),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Mensaje fijado de $pinnedSenderName',
-                      style: const TextStyle(
-                        color: premiumAmber, // El remitente en ámbar se ve mucho más premium
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    _buildContentPreview(
-                      _pinnedMessage!.content,
-                      _pinnedMessage!.messageType,
-                      Colors.white.withOpacity(0.9), // Texto blanco limpio sobre el fondo oscuro
-                      13.0,
-                    ),
-                  ],
+      },
+      child: Container(
+        margin: const EdgeInsets.only(left: 12, right: 12, bottom: 8, top: 4),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                // Fondo oscuro translúcido para dar buen contraste
+                color: Colors.black.withOpacity(0.45), 
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: premiumAmber.withOpacity(0.8), 
+                  width: 1.0,
                 ),
               ),
-              IconButton(
-                icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
-                onPressed: () async {
-                  HapticFeedback.lightImpact();
-                  await SupabaseService().unpinMessage(widget.roomId);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Mensaje desfijado.')),
-                    );
-                  }
-                },
+              child: Row(
+                children: [
+                  const Icon(Icons.push_pin, color: premiumAmber, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Mensaje fijado de $pinnedSenderName',
+                          style: const TextStyle(
+                            color: premiumAmber,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        _buildContentPreview(
+                          _pinnedMessage!.content,
+                          _pinnedMessage!.messageType,
+                          Colors.white.withOpacity(0.85),
+                          13.0,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
+                    onPressed: () async {
+                      HapticFeedback.lightImpact();
+                      await SupabaseService().unpinMessage(widget.roomId);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Mensaje desfijado.')),
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     ),
   );
 }
+
 
 
   @override
