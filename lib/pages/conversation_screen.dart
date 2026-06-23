@@ -945,7 +945,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                               }
                             }
 
-                            return Align(
+                                                        return Align(
                               key: _messageKeys[message.id], // Asignar la GlobalKey
                               alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                               child: GestureDetector(
@@ -961,8 +961,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                       padding: isMedia ? const EdgeInsets.all(4) : const EdgeInsets.fromLTRB(14, 8, 10, 6),
                                       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                                       decoration: BoxDecoration(
-                                        color: isMe ? theme.primaryColor : theme.colorScheme.surface,
+                                        // 1. CAMBIO PREMIUM: Burbujas translúcidas adaptables al tema activo
+                                        color: isMe 
+                                            ? theme.primaryColor.withOpacity(0.35) // Tus mensajes (azul o coral Plus suave)
+                                            : Colors.black.withOpacity(0.4),       // Mensajes del otro usuario (cristal oscuro neutro)
                                         borderRadius: BorderRadius.circular(18),
+                                        // 2. BORDE ULTRA FINO: Evita que la burbuja se pierda en texturas complejas de fondo
+                                        border: Border.all(
+                                          color: isMe 
+                                              ? theme.primaryColor.withOpacity(0.6) 
+                                              : Colors.white.withOpacity(0.15),
+                                          width: 1.0,
+                                        ),
                                       ),
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.end,
@@ -974,11 +984,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                               margin: const EdgeInsets.only(bottom: 6),
                                               decoration: BoxDecoration(
+                                                // 3. RESPUESTAS TRANSLÚCIDAS: Integración perfecta dentro de la burbuja
                                                 color: isMe
-                                                    ? theme.primaryColor.withOpacity(0.7) // Color más claro para mis respuestas
-                                                    : theme.colorScheme.surface.withOpacity(0.7), // Color más oscuro para respuestas de otros
+                                                    ? Colors.white.withOpacity(0.12) // Un sutil realce claro para tus respuestas
+                                                    : Colors.black.withOpacity(0.25), // Contraste limpio para las respuestas del otro
                                                 borderRadius: BorderRadius.circular(12),
-                                                border: Border(left: BorderSide(color: isMe ? Colors.white70 : theme.primaryColor, width: 3)),
+                                                // Línea vertical izquierda de la respuesta para conservar la jerarquía visual
+                                                border: Border(
+                                                  left: BorderSide(
+                                                    color: isMe ? Colors.white70 : theme.primaryColor, 
+                                                    width: 3,
+                                                  ),
+                                                ),
                                               ),
                                               child: Column(
                                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -994,7 +1011,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                                   const SizedBox(height: 4),
                                                   _buildContentPreview(
                                                     message.replyToContent!,
-                                                    message.messageType, // Tipo de mensaje original respondido
+                                                    message.messageType,
                                                     isMe ? Colors.white70 : theme.colorScheme.onSurface.withOpacity(0.7),
                                                     _fontSizeBurbuja * 0.9,
                                                   ),
@@ -1027,6 +1044,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                               height: 180,
                                               decoration: BoxDecoration(
                                                 color: Colors.black87,
+
                                                 borderRadius: BorderRadius.circular(14),
                                               ),
                                               child: const Center(
@@ -1038,20 +1056,22 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                               duration: const Duration(milliseconds: 100),
                                               curve: Curves.easeOutCubic,
                                               style: TextStyle(
+                                                // Ajustamos el color para que siempre sea legible en tus burbujas o las del otro
                                                 color: isMe ? Colors.white : theme.colorScheme.onSurface,
                                                 fontSize: _fontSizeBurbuja,
                                               ),
                                               child: Text(message.content),
                                             ),
-                                          const SizedBox(height: 2),
+                                          const SizedBox(height: 4), // Un poquito más de aire antes de la hora
                                           Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
                                               Text(
                                                 DateFormat('HH:mm').format(localTime),
                                                 style: TextStyle(
-                                                  color: isMe ? Colors.white70 : Colors.grey,
-                                                  fontSize: 11,
+                                                  // El texto de la hora se adapta al contraste translúcido
+                                                  color: isMe ? Colors.white.withOpacity(0.65) : theme.colorScheme.onSurface.withOpacity(0.5),
+                                                  fontSize: 10,
                                                 ),
                                               ),
                                               if (isMe) ...[
@@ -1059,7 +1079,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                                 Icon(
                                                   esLeido ? Icons.done_all : Icons.done,
                                                   size: 14,
-                                                  color: isMe ? Colors.white70 : theme.primaryColor,
+                                                  // Si es leído brilla en blanco puro, si no, se atenúa sutilmente
+                                                  color: esLeido ? Colors.white : Colors.white.withOpacity(0.5),
                                                 ),
                                               ],
                                             ],
@@ -1078,13 +1099,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                             vertical: _fontSizeBurbuja * 0.15,
                                           ),
                                           decoration: BoxDecoration(
-                                            color: theme.colorScheme.surfaceVariant ?? Colors.grey,
+                                            // MEJORA PREMIUM: Reacción translúcida tipo píldora de cristal
+                                            color: Colors.black.withOpacity(0.6), 
                                             borderRadius: BorderRadius.circular(_fontSizeBurbuja * 0.7),
+                                            border: Border.all(
+                                              color: Colors.white.withOpacity(0.12),
+                                              width: 0.8,
+                                            ),
                                             boxShadow: const [
                                               BoxShadow(
-                                                color: Colors.black26,
-                                                blurRadius: 3,
-                                                offset: Offset(0, 1.5),
+                                                color: Colors.black38,
+                                                blurRadius: 4,
+                                                offset: Offset(0, 2),
                                               )
                                             ],
                                           ),
@@ -1116,6 +1142,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
       ),
     );
   }
+
 
   Widget _buildChatBar() {
     final theme = Theme.of(context);
