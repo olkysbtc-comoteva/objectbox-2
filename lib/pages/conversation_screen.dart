@@ -687,21 +687,21 @@ class _ConversationScreenState extends State<ConversationScreen> {
       }
     },
     // ClipRRect es necesario para que el desenfoque no se salga de las esquinas redondeadas
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(16), // Bordes un poco más amplios, más modernos
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), // Aplica el desenfoque al fondo dinámico
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          margin: const EdgeInsets.only(left: 12, right: 12, bottom: 8),
-          decoration: BoxDecoration(
-            // Fondo translúcido oscuro para que contraste con cualquier piedra, madera o dibujo
-            color: Colors.black.withOpacity(0.4), 
-            borderRadius: BorderRadius.circular(16),
-            // Borde ámbar premium ultra fino (1.0 o 0.8 se ve más delicado que 1.5)
-            border: Border.all(color: premiumAmber.withOpacity(0.8), width: 1.0),
-          ),
-          child: Row(
+    child: ClipRect(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16), 
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), 
+          child: Container(
+            // Agregamos los márgenes laterales que sugerimos antes para que flote bien
+            margin: const EdgeInsets.only(left: 12, right: 12, bottom: 8, top: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.4), 
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: premiumAmber.withOpacity(0.8), width: 1.0),
+            ),
+            child: Row(
             children: [
               const Icon(Icons.push_pin, color: premiumAmber, size: 18),
               const SizedBox(width: 10),
@@ -963,8 +963,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                       decoration: BoxDecoration(
                                         // 1. CAMBIO PREMIUM: Burbujas translúcidas adaptables al tema activo
                                         color: isMe 
-                                            ? theme.primaryColor.withOpacity(0.35) // Tus mensajes (azul o coral Plus suave)
-                                            : Colors.black.withOpacity(0.4),       // Mensajes del otro usuario (cristal oscuro neutro)
+                                            ? theme.primaryColor.withOpacity(0.75) // Tus mensajes (azul o coral Plus suave)
+                                            : Colors.black.withOpacity(0.68),       // Mensajes del otro usuario (cristal oscuro neutro)
                                         borderRadius: BorderRadius.circular(18),
                                         // 2. BORDE ULTRA FINO: Evita que la burbuja se pierda en texturas complejas de fondo
                                         border: Border.all(
