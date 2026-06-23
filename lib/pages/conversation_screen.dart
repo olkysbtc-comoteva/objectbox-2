@@ -986,45 +986,49 @@ class _ConversationScreenState extends State<ConversationScreen> {
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           // Previsualización del mensaje respondido
-                                          if (message.replyToMessageId != null && message.replyToContent != null)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                              margin: const EdgeInsets.only(bottom: 6),
-                                              decoration: BoxDecoration(
-                                                // 3. RESPUESTAS TRANSLÚCIDAS: Integración perfecta dentro de la burbuja
-                                                color: isMe
-                                                    ? Colors.white.withOpacity(0.12) // Un sutil realce claro para tus respuestas
-                                                    : Colors.black.withOpacity(0.25), // Contraste limpio para las respuestas del otro
-                                                borderRadius: BorderRadius.circular(12),
-                                                // Línea vertical izquierda de la respuesta para conservar la jerarquía visual
-                                                border: Border(
-                                                  left: BorderSide(
-                                                    color: isMe ? Colors.white70 : theme.primaryColor, 
-                                                    width: 3,
-                                                  ),
-                                                ),
-                                              ),
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    originalReplySenderName ?? 'Usuario',
-                                                    style: TextStyle(
-                                                      fontWeight: FontWeight.bold,
-                                                      color: isMe ? Colors.white : theme.primaryColor,
-                                                      fontSize: _fontSizeBurbuja * 0.85,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(height: 4),
-                                                  _buildContentPreview(
-                                                    message.replyToContent!,
-                                                    message.messageType,
-                                                    isMe ? Colors.white70 : theme.colorScheme.onSurface.withOpacity(0.7),
-                                                    _fontSizeBurbuja * 0.9,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
+                                          // Previsualización del mensaje respondido (Optimizado para legibilidad)
+if (message.replyToMessageId != null && message.replyToContent != null)
+  Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    margin: const EdgeInsets.only(bottom: 6),
+    decoration: BoxDecoration(
+      // MEJORA: Aumentamos el contraste del fondo de la cajita de respuesta
+      color: isMe
+          ? Colors.white.withOpacity(0.18) // Un poco más claro si es tu burbuja
+          : Colors.black.withOpacity(0.35), // Un poco más oscuro si es la burbuja del otro
+      borderRadius: BorderRadius.circular(12),
+      border: Border(
+        left: BorderSide(
+          color: isMe ? Colors.white70 : theme.primaryColor, 
+          width: 3,
+        ),
+      ),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          originalReplySenderName ?? 'Usuario',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            // MEJORA: Blanco pleno para tus burbujas, o el color del tema bien nítido para el otro
+            color: isMe ? Colors.white : (theme.brightness == Brightness.dark ? theme.primaryColor : theme.primaryColor.withRed(255)),
+            fontSize: _fontSizeBurbuja * 0.85,
+          ),
+        ),
+        const SizedBox(height: 4),
+        // LLAMADO A LA VISTA PREVIA DEL CONTENIDO
+        _buildContentPreview(
+          message.replyToContent!,
+          message.messageType, 
+          // MEJORA CLAVE: Forzamos un blanco/gris muy claro para que el texto de fondo no se pierda jamás
+          isMe ? Colors.white.withOpacity(0.9) : Colors.white.withOpacity(0.8),
+          _fontSizeBurbuja * 0.9,
+        ),
+      ],
+    ),
+  ),
+
 
                                           if (isImage || isGif)
                                             ClipRRect(
