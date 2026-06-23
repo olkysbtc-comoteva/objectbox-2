@@ -693,7 +693,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), // Aplica el desenfoque al fondo dinámico
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          margin: const EdgeInsets.only(bottom: 8),
+          margin: const EdgeInsets.only(left: 12, right: 12, bottom: 8),
           decoration: BoxDecoration(
             // Fondo translúcido oscuro para que contraste con cualquier piedra, madera o dibujo
             color: Colors.black.withOpacity(0.4), 
