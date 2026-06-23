@@ -714,7 +714,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          'Mensaje fijado de $pinnedSenderName',
+                          'Mensaje fijado',
                           style: const TextStyle(
                             color: premiumAmber,
                             fontWeight: FontWeight.bold,

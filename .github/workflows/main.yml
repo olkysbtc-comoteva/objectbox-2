@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - burbujas2
+      - fijar2
       
 jobs:
   build:

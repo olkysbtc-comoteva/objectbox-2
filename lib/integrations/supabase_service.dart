@@ -239,42 +239,44 @@ class SupabaseService {
   // ===================================================
 
   // Obtener el mensaje fijado para una sala
-  Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
-    final userId = currentUserId;
-    if (userId == null) {
-      return Stream.value(null);
-    }
-    
-    // Escucha los cambios en la tabla 'chat_pinned_messages'
-    return client
-        .from('chat_pinned_messages')
-        .stream(primaryKey: ['id']) // 'id' es la PK de chat_pinned_messages
-        .eq('room_id', roomId)
-        .limit(1) // Asumimos un solo mensaje fijado por sala
-        .asyncMap((data) async {
-          if (data.isEmpty) {
-            return null;
-          }
-          final pinnedMessageData = data.first;
-          final messageId = pinnedMessageData['message_id'] as String;
+Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
+  final userId = currentUserId;
+  if (userId == null) {
+    return Stream.value(null);
+  }
+  
+  return client
+      .from('chat_pinned_messages')
+      .stream(primaryKey: ['id']) 
+      .eq('room_id', roomId)
+      .limit(1) 
+      .asyncMap((data) async {
+        if (data.isEmpty) {
+          return null; // Si se borró de la tabla, borra el banner al instante
+        }
+        
+        final pinnedMessageData = data.first;
+        final messageId = pinnedMessageData['message_id'] as String;
 
-          // Ahora, busca los detalles completos del mensaje original
+        try {
+          // CAMBIO CLAVE: Usar maybeSingle() en lugar de single()
           final messageResponse = await client
               .from('messages')
               .select()
               .eq('id', messageId)
-              .single()
-              .catchError((e) {
-                debugPrint('Error al obtener el mensaje fijado: $e');
-                return null;
-              });
+              .maybeSingle(); // No explota si no lo encuentra inmediatamente
 
           if (messageResponse != null) {
-            return ChatMessage.fromJson(messageResponse as Map<String, dynamic>);
+            return ChatMessage.fromJson(messageResponse);
           }
           return null;
-        });
-  }
+        } catch (e) {
+          debugPrint('Error al obtener el mensaje fijado: $e');
+          return null;
+        }
+      });
+}
+
 
   // Fijar un mensaje en una sala
   Future<void> pinMessage(String roomId, String messageId) async {
