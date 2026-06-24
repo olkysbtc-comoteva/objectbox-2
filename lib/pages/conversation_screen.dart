@@ -373,11 +373,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
           onTap: () async {
             Navigator.pop(context);
             await SupabaseService().pinMessage(widget.roomId, message.id);
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Mensaje fijado.')),
-              );
-            }
+if (mounted) {
+  setState(() {
+    _pinnedMessage = message; // Fuerza el cambio visual al instante
+  });
+}
           },
         ),
       );
