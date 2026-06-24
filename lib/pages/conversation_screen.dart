@@ -36,6 +36,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final ValueNotifier<ChatMessage?> _pinnedMessageNotifier = ValueNotifier<ChatMessage?>(null);
   final TextEditingController _messageController = TextEditingController();
   static const Color amberPremium = Color(0xFFD4AF37);
+  DateTime _ultimaActualizacionFijado = DateTime.now();
 
   static const String _fontStorageKey = 'chat_bubble_font_size';
   double _fontSizeBurbuja = 16.0;
@@ -64,14 +65,19 @@ void initState() {
 
   // 1. Guardamos la instancia del stream fija una sola vez
   _pinnedStream = SupabaseService().getPinnedMessageStream(widget.roomId);
-  DateTime _ultimaActualizacionFijado = DateTime.now();
+  
 
     // Cambiá el bloque de escucha de tu initState por este:
   _pinnedMessageSubscription = _pinnedStream.listen((message) {
-  // CLAVE: Cada vez que llega un evento del stream, validamos el orden.
-  // Si limpiamos desde el botón, asignaremos una marca de tiempo nueva que invalidará 
-  // cualquier respuesta retrasada del stream que se haya generado ANTES de presionar el botón.
-  
+  // 1. Capturamos el momento exacto en el que entra este evento de red
+  final momentoEmision = DateTime.now();
+
+  // 2. Si este evento se generó antes de nuestra última acción (como presionar el botón), lo destruimos
+  if (momentoEmision.isBefore(_ultimaActualizacionFijado)) {
+    debugPrint('⏳ Ignorando evento viejo del stream para evitar regreso al pasado');
+    return;
+  }
+
   if (message == null) {
     debugPrint('🎨 UI LISTEN: El backend confirma que está vacío.');
     _pinnedMessage = null;
@@ -79,19 +85,18 @@ void initState() {
     return;
   }
 
-  // Filtro anti-repetición estricto
   if (_pinnedMessage != null && message.id == _pinnedMessage!.id) {
     debugPrint('🚫 UI LISTEN: Mensaje idéntico bloqueado.');
     return; 
   }
 
-  // Si pasaron los filtros de concurrencia, actualizamos la UI con seguridad
   debugPrint('🎨 UI LISTEN: Renderizando mensaje fijado legítimo: ${message.content}');
   _pinnedMessage = message; 
   _pinnedMessageNotifier.value = message; 
 }, onError: (error) {
   debugPrint('Error en el stream de mensajes fijados: $error');
 });
+
 
       
    
