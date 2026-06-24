@@ -241,26 +241,16 @@ class SupabaseService {
   // Obtener el mensaje fijado para una sala
 Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
   final userId = currentUserId;
-  if (userId == null) {
-    debugPrint('🚨 STREAM: Usuario no autenticado');
-    return Stream.value(null);
-  }
+  if (userId == null) return Stream<ChatMessage?>.value(null);
   
-  debugPrint('📡 STREAM: Iniciando escucha Realtime para la sala: $roomId');
-
-  return client
+  // 1. Creamos el stream base resolviendo la lógica asíncrona
+  final Stream<ChatMessage?> baseStream = client
       .from('chat_pinned_messages')
       .stream(primaryKey: ['id']) 
       .eq('room_id', roomId)
       .limit(1) 
-      .asyncMap((data) async {
-        // DIAGNÓSTICO 1: Ver si Supabase Realtime detecta el cambio de filas
-        debugPrint('⚡ REALTIME EVENT: Cambió la tabla de fijados. Cantidad de filas: ${data.length}');
-        
-        if (data.isEmpty) {
-          debugPrint('🧹 REALTIME EVENT: La tabla quedó vacía, enviando NULL a la UI');
-          return null; 
-        }
+      .asyncMap<ChatMessage?>((data) async {
+        if (data.isEmpty) return null; 
         
         final pinnedMessageData = data.first;
         final messageId = pinnedMessageData['message_id'] as String?;
@@ -274,20 +264,22 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
               .eq('id', messageId)
               .maybeSingle();
 
-          // DIAGNÓSTICO 2: Ver si encuentra el contenido del mensaje original
-          debugPrint('📄 BASE DE DATOS: Mensaje encontrado en tabla messages: ${messageResponse != null}');
-
           if (messageResponse != null) {
             return ChatMessage.fromJson(messageResponse);
           }
           return null;
         } catch (e) {
-          debugPrint('❌ ERROR ASÍNCRONO: En la consulta del mensaje fijado: $e');
+          debugPrint('Error asíncrono en mensaje fijado: $e');
           return null;
         }
       });
-      .distinct((ChatMessage? previous, ChatMessage? next) => previous?.id == next?.id);
+
+  // 2. Aplicamos el distinct de forma aislada para que no confunda al compilador
+  return baseStream.distinct((ChatMessage? previous, ChatMessage? next) {
+    return previous?.id == next?.id;
+  });
 }
+
 
 
 
