@@ -735,14 +735,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   IconButton(
                     icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
                     onPressed: () async {
-                      HapticFeedback.lightImpact();
-                      await SupabaseService().unpinMessage(widget.roomId);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Mensaje desfijado.')),
-                        );
-                      }
-                    },
+  HapticFeedback.lightImpact();
+  await SupabaseService().unpinMessage(widget.roomId);
+  // FALTA ACTUALIZAR LA VARIABLE LOCAL SI EL STREAM NO REACCIONÓ
+  if (mounted) {
+    setState(() {
+      _pinnedMessage = null; // Fuerza la desaparición visual inmediata
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Mensaje desfijado.')),
+    );
+  }
+},
                   ),
                 ],
               ),
