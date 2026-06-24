@@ -350,31 +350,40 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
     // NUEVO: Opciones de fijar/desfijar
     if (_pinnedMessage?.id == message.id) {
-      options.add(
-        ListTile(
-          leading: const Icon(Icons.push_pin_outlined, color: Colors.red),
-          title: const Text('Desfijar mensaje'),
-          onTap: () async {
-            await SupabaseService().unpinMessage(widget.roomId);
-_pinnedMessageNotifier.value = null;
-            }
-          },
-        ),
-      );
-    } else {
-      options.add(
-        ListTile(
-          leading: const Icon(Icons.push_pin, color: Colors.amber),
-          title: const Text('Fijar mensaje'),
-          onTap: () async {
-            Navigator.pop(context);
-            await SupabaseService().pinMessage(widget.roomId, message.id);
-_pinnedMessageNotifier.value = message;
-        }
-          },
-        ),
-      );
-    }
+    options.add(
+      ListTile(
+        leading: const Icon(Icons.push_pin_outlined, color: Colors.red),
+        title: const Text('Desfijar mensaje'),
+        onTap: () async {
+          Navigator.pop(context);
+          await SupabaseService().unpinMessage(widget.roomId);
+          _pinnedMessageNotifier.value = null; // Fuerza desaparición visual
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Mensaje desfijado.')),
+            );
+          }
+        }, // <-- Aquí cerramos bien el onTap
+      ),
+    );
+  } else {
+    options.add(
+      ListTile(
+        leading: const Icon(Icons.push_pin, color: Colors.amber),
+        title: const Text('Fijar mensaje'),
+        onTap: () async {
+          Navigator.pop(context);
+          await SupabaseService().pinMessage(widget.roomId, message.id);
+          _pinnedMessageNotifier.value = message; // Fuerza actualización visual
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Mensaje fijado.')),
+            );
+          }
+        }, // <-- Aquí cerramos bien el onTap
+      ),
+    );
+  }
 
     if (isMedia) {
       options.add(
