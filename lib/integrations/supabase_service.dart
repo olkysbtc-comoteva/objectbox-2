@@ -243,8 +243,7 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
   final userId = currentUserId;
   if (userId == null) return Stream<ChatMessage?>.value(null);
   
-  // 1. Creamos el stream base resolviendo la lógica asíncrona
-  final Stream<ChatMessage?> baseStream = client
+  return client
       .from('chat_pinned_messages')
       .stream(primaryKey: ['id']) 
       .eq('room_id', roomId)
@@ -273,12 +272,8 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
           return null;
         }
       });
-
-  // 2. Aplicamos el distinct de forma aislada para que no confunda al compilador
-  return baseStream.distinct((ChatMessage? previous, ChatMessage? next) {
-    return previous?.id == next?.id;
-  });
 }
+
 
 
 

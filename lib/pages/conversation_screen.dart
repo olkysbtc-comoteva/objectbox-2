@@ -65,14 +65,25 @@ void initState() {
   // 1. Guardamos la instancia del stream fija una sola vez
   _pinnedStream = SupabaseService().getPinnedMessageStream(widget.roomId);
 
-  // 2. Escuchamos usando esa misma referencia fija
+    // Cambiá el bloque de escucha de tu initState por este:
   _pinnedMessageSubscription = _pinnedStream.listen((message) {
+    // FILTRO INTELIGENTE LOCAL: 
+    // Si el ID del mensaje que llega es exactamente igual al que ya tenemos en pantalla, 
+    // lo ignoramos para evitar parpadeos o regresos al pasado.
+    if (message?.id == _pinnedMessage?.id && message != null) {
+      debugPrint('🚫 UI LISTEN: Mensaje repetido bloqueado localmente');
+      return; 
+    }
+
     debugPrint('🎨 UI LISTEN: Llegó desde stream estable: ${message?.content}');
+    
+    // Si pasa el filtro, actualizamos el Notificador y la interfaz al instante
     _pinnedMessage = message; 
     _pinnedMessageNotifier.value = message; 
   }, onError: (error) {
     debugPrint('Error en el stream de mensajes fijados: $error');
   });
+
       
    
     WidgetsBinding.instance.addPostFrameCallback((_) async {
