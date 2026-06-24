@@ -374,10 +374,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
             Navigator.pop(context);
             await SupabaseService().pinMessage(widget.roomId, message.id);
 if (mounted) {
-  setState(() {
-    _pinnedMessage = message; // Fuerza el cambio visual al instante
-  });
-}
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Mensaje fijado.')),
+          );
+        }
           },
         ),
       );
@@ -735,18 +735,15 @@ if (mounted) {
                   IconButton(
                     icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
                     onPressed: () async {
-  HapticFeedback.lightImpact();
-  await SupabaseService().unpinMessage(widget.roomId);
-  // FALTA ACTUALIZAR LA VARIABLE LOCAL SI EL STREAM NO REACCIONÓ
-  if (mounted) {
-    setState(() {
-      _pinnedMessage = null; // Fuerza la desaparición visual inmediata
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Mensaje desfijado.')),
-    );
-  }
-},
+                      HapticFeedback.lightImpact();
+                      // CORRECCIÓN: El servicio elimina la fila y el Stream limpia la UI solo
+                      await SupabaseService().unpinMessage(widget.roomId);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Mensaje desfijado.')),
+                        );
+                      }
+                    },
                   ),
                 ],
               ),
