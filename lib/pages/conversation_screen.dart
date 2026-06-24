@@ -70,11 +70,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
 }, onError: (error) {
   debugPrint('Error en el stream de mensajes fijados: $error');
 });
-      }
-    }, onError: (error) {
-      debugPrint('Error en el stream de mensajes fijados: $error');
-    });
-
+      
+   
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
         final appState = AppState.of(context, listen: false);
