@@ -286,7 +286,7 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
           return null;
         }
       });
-      .distinct((previous, next) => previous?.id == next?.id);
+      .distinct((ChatMessage? previous, ChatMessage? next) => previous?.id == next?.id);
 }
 
 
