@@ -898,9 +898,22 @@ if (mounted) {
                 ),
               ),
             Column(
-              children: [
-                // NUEVO: Banner de mensaje fijado, visible solo si hay un mensaje fijado
-                if (_pinnedMessage != null) _buildPinnedMessageBanner(),
+  children: [
+    // CAMBIO CLAVE: Escuchar el flujo en tiempo real directamente en el árbol de diseño
+    StreamBuilder<ChatMessage?>(
+      stream: SupabaseService().getPinnedMessageStream(widget.roomId),
+      initialData: _pinnedMessage, // Evita parpadeos al cargar la pantalla
+      builder: (context, pinnedSnapshot) {
+        final currentPinned = pinnedSnapshot.data;
+        
+        // Sincronizamos la variable local interna para que tus menús contextuales sigan funcionando
+        _pinnedMessage = currentPinned;
+
+        if (currentPinned == null) return const SizedBox.shrink();
+        
+        return _buildPinnedMessageBanner();
+      },
+    ),
 
                 Expanded(
                   child: StreamBuilder<List<ChatMessage>>(
