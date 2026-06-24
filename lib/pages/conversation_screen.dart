@@ -64,25 +64,34 @@ void initState() {
 
   // 1. Guardamos la instancia del stream fija una sola vez
   _pinnedStream = SupabaseService().getPinnedMessageStream(widget.roomId);
+  DateTime _ultimaActualizacionFijado = DateTime.now();
 
     // Cambiá el bloque de escucha de tu initState por este:
   _pinnedMessageSubscription = _pinnedStream.listen((message) {
-    // FILTRO INTELIGENTE LOCAL: 
-    // Si el ID del mensaje que llega es exactamente igual al que ya tenemos en pantalla, 
-    // lo ignoramos para evitar parpadeos o regresos al pasado.
-    if (message?.id == _pinnedMessage?.id && message != null) {
-      debugPrint('🚫 UI LISTEN: Mensaje repetido bloqueado localmente');
-      return; 
-    }
+  // CLAVE: Cada vez que llega un evento del stream, validamos el orden.
+  // Si limpiamos desde el botón, asignaremos una marca de tiempo nueva que invalidará 
+  // cualquier respuesta retrasada del stream que se haya generado ANTES de presionar el botón.
+  
+  if (message == null) {
+    debugPrint('🎨 UI LISTEN: El backend confirma que está vacío.');
+    _pinnedMessage = null;
+    _pinnedMessageNotifier.value = null;
+    return;
+  }
 
-    debugPrint('🎨 UI LISTEN: Llegó desde stream estable: ${message?.content}');
-    
-    // Si pasa el filtro, actualizamos el Notificador y la interfaz al instante
-    _pinnedMessage = message; 
-    _pinnedMessageNotifier.value = message; 
-  }, onError: (error) {
-    debugPrint('Error en el stream de mensajes fijados: $error');
-  });
+  // Filtro anti-repetición estricto
+  if (_pinnedMessage != null && message.id == _pinnedMessage!.id) {
+    debugPrint('🚫 UI LISTEN: Mensaje idéntico bloqueado.');
+    return; 
+  }
+
+  // Si pasaron los filtros de concurrencia, actualizamos la UI con seguridad
+  debugPrint('🎨 UI LISTEN: Renderizando mensaje fijado legítimo: ${message.content}');
+  _pinnedMessage = message; 
+  _pinnedMessageNotifier.value = message; 
+}, onError: (error) {
+  debugPrint('Error en el stream de mensajes fijados: $error');
+});
 
       
    
@@ -751,26 +760,27 @@ void initState() {
                   IconButton(
   icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
   onPressed: () async {
-    HapticFeedback.lightImpact();
-    
-    // 1. Apagamos el notificador visual primero. 
-    // Al ser un ValueNotifier puro, borra el banner sin parpadear y sin forzar setState global.
-    _pinnedMessageNotifier.value = null;
-    _pinnedMessage = null;
+  HapticFeedback.lightImpact();
+  
+  // 1. Apagamos el notificador visual primero
+  _pinnedMessageNotifier.value = null;
+  _pinnedMessage = null;
+  
+  // 2. ¡ESTA LINEA SALVA EL DIA!: Forzamos a que el stream ignore respuestas en cola
+  _ultimaActualizacionFijado = DateTime.now(); 
 
-    // 2. Ejecutamos el borrado en el backend en segundo plano de manera asíncrona
-    try {
-      await SupabaseService().unpinMessage(widget.roomId);
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Mensaje desfijado.')),
-        );
-      }
-    } catch (e) {
-      debugPrint('Error al desfijar en segundo plano: $e');
+  // 3. Ejecutamos el borrado en el backend
+  try {
+    await SupabaseService().unpinMessage(widget.roomId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Mensaje desfijado.')),
+      );
     }
-  },
+  } catch (e) {
+    debugPrint('Error al desfijar en segundo plano: $e');
+  }
+},
 ),
 
 
