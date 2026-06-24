@@ -32,6 +32,7 @@ class ConversationScreen extends StatefulWidget {
 
 class _ConversationScreenState extends State<ConversationScreen> {
   final ScrollController _scrollController = ScrollController();
+  final ValueNotifier<ChatMessage?> _pinnedMessageNotifier = ValueNotifier<ChatMessage?>(null);
   final TextEditingController _messageController = TextEditingController();
   static const Color amberPremium = Color(0xFFD4AF37);
 
@@ -62,12 +63,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
 
     // NUEVO: Inicializar suscripción a mensajes fijados
     _pinnedMessageSubscription = SupabaseService()
-        .getPinnedMessageStream(widget.roomId)
-        .listen((message) {
-      if (mounted) {
-        setState(() {
-          _pinnedMessage = message;
-        });
+    .getPinnedMessageStream(widget.roomId)
+    .listen((message) {
+  _pinnedMessage = message; // Mantiene tu variable vieja por las dudas
+  _pinnedMessageNotifier.value = message; // ¡Esto despierta a la interfaz!
+}, onError: (error) {
+  debugPrint('Error en el stream de mensajes fijados: $error');
+});
       }
     }, onError: (error) {
       debugPrint('Error en el stream de mensajes fijados: $error');
@@ -103,6 +105,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _scrollController.dispose();
     _messageController.dispose();
     _pinnedMessageSubscription?.cancel(); // NUEVO: Cancelar suscripción del mensaje fijado
+    _pinnedMessageNotifier.dispose();
     super.dispose();
   }
 
@@ -355,12 +358,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
           leading: const Icon(Icons.push_pin_outlined, color: Colors.red),
           title: const Text('Desfijar mensaje'),
           onTap: () async {
-            Navigator.pop(context);
             await SupabaseService().unpinMessage(widget.roomId);
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Mensaje desfijado.')),
-              );
+_pinnedMessageNotifier.value = null;
             }
           },
         ),
@@ -373,10 +372,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
           onTap: () async {
             Navigator.pop(context);
             await SupabaseService().pinMessage(widget.roomId, message.id);
-if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Mensaje fijado.')),
-          );
+_pinnedMessageNotifier.value = message;
         }
           },
         ),
@@ -899,21 +895,14 @@ if (mounted) {
               ),
             Column(
   children: [
-    // CAMBIO CLAVE: Escuchar el flujo en tiempo real directamente en el árbol de diseño
-    StreamBuilder<ChatMessage?>(
-      stream: SupabaseService().getPinnedMessageStream(widget.roomId),
-      initialData: _pinnedMessage, // Evita parpadeos al cargar la pantalla
-      builder: (context, pinnedSnapshot) {
-        final currentPinned = pinnedSnapshot.data;
-        
-        // Sincronizamos la variable local interna para que tus menús contextuales sigan funcionando
-        _pinnedMessage = currentPinned;
-
-        if (currentPinned == null) return const SizedBox.shrink();
-        
+    ValueListenableBuilder<ChatMessage?>(
+      valueListenable: _pinnedMessageNotifier,
+      builder: (context, pinnedMessage, child) {
+        if (pinnedMessage == null) return const SizedBox.shrink();
         return _buildPinnedMessageBanner();
       },
     ),
+
 
                 Expanded(
                   child: StreamBuilder<List<ChatMessage>>(
