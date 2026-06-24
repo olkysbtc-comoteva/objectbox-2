@@ -738,18 +738,47 @@ void initState() {
                     ),
                   ),
                   IconButton(
-                    icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
-                    onPressed: () async {
-                      HapticFeedback.lightImpact();
-                      // CORRECCIÓN: El servicio elimina la fila y el Stream limpia la UI solo
-                      await SupabaseService().unpinMessage(widget.roomId);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Mensaje desfijado.')),
-                        );
-                      }
-                    },
-                  ),
+  icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
+  onPressed: () async {
+    HapticFeedback.lightImpact();
+    
+    // 1. Matamos la suscripción activa de inmediato para que ningún evento fantasma posterior pise el null
+    await _pinnedMessageSubscription?.cancel();
+    _pinnedMessageSubscription = null;
+
+    // 2. Vaciamos los notificadores e interfaces de forma local y contundente
+    _pinnedMessageNotifier.value = null;
+    _pinnedMessage = null;
+
+    if (mounted) {
+      setState(() {}); // Forzamos el redibujo sin el banner
+    }
+
+    // 3. Borramos el registro del backend en segundo plano
+    try {
+      await SupabaseService().unpinMessage(widget.roomId);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mensaje desfijado.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error al desfijar en segundo plano: $e');
+    }
+
+    // 4. NUEVO: Reiniciamos la escucha limpia del stream una vez que el backend ya quedó en cero
+    if (mounted) {
+      _pinnedMessageSubscription = _pinnedStream.listen((message) {
+        _pinnedMessage = message; 
+        _pinnedMessageNotifier.value = message; 
+      }, onError: (error) {
+        debugPrint('Error en el stream de mensajes fijados: $error');
+      });
+    }
+  },
+),
+
                 ],
               ),
             ),
