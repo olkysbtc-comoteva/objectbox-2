@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - fijar2
+      - fijarlog
       
 jobs:
   build:

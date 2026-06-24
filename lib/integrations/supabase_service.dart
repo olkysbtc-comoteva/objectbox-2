@@ -242,40 +242,52 @@ class SupabaseService {
 Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
   final userId = currentUserId;
   if (userId == null) {
+    debugPrint('🚨 STREAM: Usuario no autenticado');
     return Stream.value(null);
   }
   
+  debugPrint('📡 STREAM: Iniciando escucha Realtime para la sala: $roomId');
+
   return client
       .from('chat_pinned_messages')
       .stream(primaryKey: ['id']) 
       .eq('room_id', roomId)
       .limit(1) 
       .asyncMap((data) async {
+        // DIAGNÓSTICO 1: Ver si Supabase Realtime detecta el cambio de filas
+        debugPrint('⚡ REALTIME EVENT: Cambió la tabla de fijados. Cantidad de filas: ${data.length}');
+        
         if (data.isEmpty) {
-          return null; // Si se borró de la tabla, borra el banner al instante
+          debugPrint('🧹 REALTIME EVENT: La tabla quedó vacía, enviando NULL a la UI');
+          return null; 
         }
         
         final pinnedMessageData = data.first;
-        final messageId = pinnedMessageData['message_id'] as String;
+        final messageId = pinnedMessageData['message_id'] as String?;
+
+        if (messageId == null) return null;
 
         try {
-          // CAMBIO CLAVE: Usar maybeSingle() en lugar de single()
           final messageResponse = await client
               .from('messages')
               .select()
               .eq('id', messageId)
-              .maybeSingle(); // No explota si no lo encuentra inmediatamente
+              .maybeSingle();
+
+          // DIAGNÓSTICO 2: Ver si encuentra el contenido del mensaje original
+          debugPrint('📄 BASE DE DATOS: Mensaje encontrado en tabla messages: ${messageResponse != null}');
 
           if (messageResponse != null) {
             return ChatMessage.fromJson(messageResponse);
           }
           return null;
         } catch (e) {
-          debugPrint('Error al obtener el mensaje fijado: $e');
+          debugPrint('❌ ERROR ASÍNCRONO: En la consulta del mensaje fijado: $e');
           return null;
         }
       });
 }
+
 
 
   // Fijar un mensaje en una sala
