@@ -32,6 +32,7 @@ class ConversationScreen extends StatefulWidget {
 
 class _ConversationScreenState extends State<ConversationScreen> {
   final ScrollController _scrollController = ScrollController();
+  late final Stream<ChatMessage?> _pinnedStream; // <-- Instancia única fija
   final ValueNotifier<ChatMessage?> _pinnedMessageNotifier = ValueNotifier<ChatMessage?>(null);
   final TextEditingController _messageController = TextEditingController();
   static const Color amberPremium = Color(0xFFD4AF37);
@@ -51,25 +52,27 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final Map<String, GlobalKey> _messageKeys = {};
 
   @override
-  void initState() {
-    super.initState();
-    _cargarPreferenciaTamano();
+void initState() {
+  super.initState();
+  _cargarPreferenciaTamano();
 
-    if (widget.chatRoom != null) {
-      _contactName = widget.chatRoom?.otherUser?.displayName;
-    } else {
-      _fetchContactDetails();
-    }
+  if (widget.chatRoom != null) {
+    _contactName = widget.chatRoom?.otherUser?.displayName;
+  } else {
+    _fetchContactDetails();
+  }
 
-    // NUEVO: Inicializar suscripción a mensajes fijados
-    _pinnedMessageSubscription = SupabaseService()
-    .getPinnedMessageStream(widget.roomId)
-    .listen((message) {
-  _pinnedMessage = message; // Mantiene tu variable vieja por las dudas
-  _pinnedMessageNotifier.value = message; // ¡Esto despierta a la interfaz!
-}, onError: (error) {
-  debugPrint('Error en el stream de mensajes fijados: $error');
-});
+  // 1. Guardamos la instancia del stream fija una sola vez
+  _pinnedStream = SupabaseService().getPinnedMessageStream(widget.roomId);
+
+  // 2. Escuchamos usando esa misma referencia fija
+  _pinnedMessageSubscription = _pinnedStream.listen((message) {
+    debugPrint('🎨 UI LISTEN: Llegó desde stream estable: ${message?.content}');
+    _pinnedMessage = message; 
+    _pinnedMessageNotifier.value = message; 
+  }, onError: (error) {
+    debugPrint('Error en el stream de mensajes fijados: $error');
+  });
       
    
     WidgetsBinding.instance.addPostFrameCallback((_) async {
