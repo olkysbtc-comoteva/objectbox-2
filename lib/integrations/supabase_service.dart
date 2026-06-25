@@ -245,19 +245,28 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
   
   return client
       .from('chat_pinned_messages')
+      // 1. Iniciamos el stream de Supabase
       .stream(primaryKey: ['id']) 
-      .eq('room_id', roomId)
-      .eq('user_id', userId) // <--- OBLIGATORIO: Filtra para ver solo tu fijado privado
-      .limit(1) 
+      // 2. ÚNICO FILTRO PERMITIDO POR EL SDK: Filtramos por sala en el servidor
+      .eq('room_id', roomId) 
+      .limit(2) // Permitimos traer hasta 2 filas (la tuya y la del compañero)
       .asyncMap<ChatMessage?>((data) async {
         if (data.isEmpty) return null; 
         
-        final pinnedMessageData = data.first;
-        final messageId = pinnedMessageData['message_id'] as String?;
+        // 3. FILTRO LOCAL EN DART: Buscamos dentro de la lista únicamente la fila que te pertenece
+        final miFijadoPrivado = data.firstWhere(
+          (row) => row['user_id'] == userId,
+          orElse: () => {}, // Si no hay nada tuyo, devolvemos un mapa vacío
+        );
 
+        // Si no tienes ningún mensaje fijado propio en esta sala, salimos con null
+        if (miFijadoPrivado.isEmpty) return null;
+
+        final messageId = miFijadoPrivado['message_id'] as String?;
         if (messageId == null) return null;
 
         try {
+          // 4. Vamos a buscar el contenido real del mensaje a la tabla de mensajes
           final messageResponse = await client
               .from('messages')
               .select()
@@ -274,6 +283,7 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
         }
       });
 }
+
 
 
 
