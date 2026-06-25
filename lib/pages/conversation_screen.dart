@@ -32,7 +32,7 @@ class ConversationScreen extends StatefulWidget {
 
 class _ConversationScreenState extends State<ConversationScreen> {
   final ScrollController _scrollController = ScrollController();
-  late final Stream<ChatMessage?> _pinnedStream; // <-- Instancia única fija
+  Stream<ChatMessage?> _pinnedStream; // <-- Instancia única fija
   final ValueNotifier<ChatMessage?> _pinnedMessageNotifier = ValueNotifier<ChatMessage?>(null);
   final TextEditingController _messageController = TextEditingController();
   static const Color amberPremium = Color(0xFFD4AF37);
@@ -53,16 +53,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final Map<String, GlobalKey> _messageKeys = {};
 
 void _inicializarStreamFijado() {
-  // Cancelamos cualquier escucha previa para evitar fugas de memoria o streams congelados
+  // 1. Cancelamos la escucha anterior si existía
   _pinnedMessageSubscription?.cancel();
   
+  // 2. Asignamos el nuevo flujo (ahora sí permite sobreescribirse sin el error 'late')
   _pinnedStream = SupabaseService().getPinnedMessageStream(widget.roomId);
   
-  _pinnedMessageSubscription = _pinnedStream.listen((message) {
+  // 3. Escuchamos el flujo de forma segura usando el operador de acceso seguro '?'
+  _pinnedMessageSubscription = _pinnedStream?.listen((message) {
     if (!mounted) return;
     
     if (message == null) {
-      debugPrint('🎨 UI LISTEN: El backend confirma que está vacío (desfijado).');
       setState(() {
         _pinnedMessage = null;
         _pinnedMessageNotifier.value = null;
@@ -70,9 +71,6 @@ void _inicializarStreamFijado() {
       return;
     }
 
-    debugPrint('🎨 UI LISTEN: Actualizando mensaje fijado en tiempo real: ${message.content}');
-    
-    // Forzamos el redibujado de la pantalla con el nuevo mensaje al instante
     setState(() {
       _pinnedMessage = message; 
       _pinnedMessageNotifier.value = message;
@@ -81,6 +79,7 @@ void _inicializarStreamFijado() {
     debugPrint('Error en el stream de mensajes fijados: $error');
   });
 }
+
 
 
   @override
