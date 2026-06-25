@@ -52,22 +52,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
   // NUEVO: Mapa para almacenar GlobalKeys por message.id para el scroll
   final Map<String, GlobalKey> _messageKeys = {};
 
-  @override
-void initState() {
-  super.initState();
-  _cargarPreferenciaTamano();
-  
-  _inicializarStreamFijado();
-
-  if (widget.chatRoom != null) {
-    _contactName = widget.chatRoom?.otherUser?.displayName;
-  } else {
-    _fetchContactDetails();
-  }
-
-  
-
-
 void _inicializarStreamFijado() {
   // Cancelamos cualquier escucha previa para evitar fugas de memoria o streams congelados
   _pinnedMessageSubscription?.cancel();
@@ -97,6 +81,25 @@ void _inicializarStreamFijado() {
     debugPrint('Error en el stream de mensajes fijados: $error');
   });
 }
+
+
+  @override
+void initState() {
+  super.initState();
+  _cargarPreferenciaTamano();
+  
+  _inicializarStreamFijado();
+
+  if (widget.chatRoom != null) {
+    _contactName = widget.chatRoom?.otherUser?.displayName;
+  } else {
+    _fetchContactDetails();
+  }
+
+  
+
+
+
 
 
 
