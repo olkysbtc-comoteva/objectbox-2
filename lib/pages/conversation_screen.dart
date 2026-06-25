@@ -766,7 +766,7 @@ void initState() {
   _pinnedMessage = null;
   
   // 2. ¡ESTA LINEA SALVA EL DIA!: Forzamos a que el stream ignore respuestas en cola
-  _ultimaActualizacionFijado = DateTime.now(); 
+   
 
   // 3. Ejecutamos el borrado en el backend
   try {
