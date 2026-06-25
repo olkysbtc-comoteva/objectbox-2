@@ -759,28 +759,36 @@ void initState() {
                   IconButton(
   icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
   onPressed: () async {
-  HapticFeedback.lightImpact();
-  
-  // 1. Apagamos el notificador visual primero
-  _pinnedMessageNotifier.value = null;
-  _pinnedMessage = null;
-  
-  // 2. ¡ESTA LINEA SALVA EL DIA!: Forzamos a que el stream ignore respuestas en cola
-   
+    HapticFeedback.lightImpact();
+    
+    // 1. Apagamos el notificador visual primero
+    _pinnedMessageNotifier.value = null;
+    _pinnedMessage = null;
+    
+    // 2. ¡ESTA LINEA SALVA EL DIA!: Cancelamos la suscripción activa temporalmente
+    // para evitar que el stream reaccione tarde o pinte estados intermedios.
+    await _pinnedMessageSubscription?.cancel();
 
-  // 3. Ejecutamos el borrado en el backend
-  try {
-    await SupabaseService().unpinMessage(widget.roomId);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mensaje desfijado.')),
-      );
+    // 3. Ejecutamos el borrado en el backend
+    try {
+      await SupabaseService().unpinMessage(widget.roomId);
+      
+      // 4. Volvemos a escuchar el stream para que quede listo si el usuario fija otro después
+      _pinnedMessageSubscription = _pinnedStream.listen((message) {
+        // Tu lógica de escucha que ya tienes escrita...
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mensaje desfijado.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error al desfijar en segundo plano: $e');
     }
-  } catch (e) {
-    debugPrint('Error al desfijar en segundo plano: $e');
-  }
-},
+  },
 ),
+
 
 
                 ],

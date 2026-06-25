@@ -245,28 +245,26 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
   
   return client
       .from('chat_pinned_messages')
-      // 1. Iniciamos el stream de Supabase
-      .stream(primaryKey: ['id']) 
-      // 2. ÚNICO FILTRO PERMITIDO POR EL SDK: Filtramos por sala en el servidor
-      .eq('room_id', roomId) 
-      .limit(2) // Permitimos traer hasta 2 filas (la tuya y la del compañero)
+      .stream(primaryKey: ['id']) // 1. Escucha en tiempo real basada en el ID primario
+      .eq('room_id', roomId)      // 2. ÚNICO FILTRO PERMITIDO POR EL SDK
+      .order('id')                // 3. Forzamos un orden estable para evitar saltos de índice
+      .limit(2)                   // Traemos tu fijado y el de la otra persona
       .asyncMap<ChatMessage?>((data) async {
         if (data.isEmpty) return null; 
         
-        // 3. FILTRO LOCAL EN DART: Buscamos dentro de la lista únicamente la fila que te pertenece
+        // FILTRO LOCAL EN DART: Buscamos tu registro de forma manual
         final miFijadoPrivado = data.firstWhere(
           (row) => row['user_id'] == userId,
-          orElse: () => {}, // Si no hay nada tuyo, devolvemos un mapa vacío
+          orElse: () => <String, dynamic>{}, 
         );
 
-        // Si no tienes ningún mensaje fijado propio en esta sala, salimos con null
         if (miFijadoPrivado.isEmpty) return null;
 
         final messageId = miFijadoPrivado['message_id'] as String?;
         if (messageId == null) return null;
 
         try {
-          // 4. Vamos a buscar el contenido real del mensaje a la tabla de mensajes
+          // Buscamos el contenido real del mensaje en la tabla de mensajes
           final messageResponse = await client
               .from('messages')
               .select()
@@ -290,25 +288,45 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
 
 
 
+
   // Fijar un mensaje en una sala
   Future<void> pinMessage(String roomId, String messageId) async {
   final userId = currentUserId;
   if (userId == null) return;
 
   try {
-    // Al usar upsert con onConflict, Supabase pisa el registro viejo en un solo paso
-    await client.from('chat_pinned_messages').upsert({
+    // EN CONSULTAS NORMALES SÍ SE PUEDE DOBLE FILTRO: Buscamos si ya existe registro previo
+    final existente = await client
+        .from('chat_pinned_messages')
+        .select('id')
+        .eq('room_id', roomId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    final Map<String, dynamic> payload = {
       'room_id': roomId,
       'message_id': messageId,
       'user_id': userId,
-    }, onConflict: 'room_id,user_id'); 
+    };
 
-    debugPrint('✅ Mensaje privado fijado/reemplazado con éxito en la sala $roomId');
+    // Si encontramos una fila previa, reutilizamos su ID para que el Stream no cree un objeto nuevo
+    if (existente != null && existente['id'] != null) {
+      payload['id'] = existente['id'];
+    }
+
+    // El upsert ahora modificará la misma celda de memoria/base de datos
+    await client.from('chat_pinned_messages').upsert(
+      payload, 
+      onConflict: 'room_id,user_id'
+    ); 
+
+    debugPrint('✅ Mensaje privado reemplazado con éxito instantáneo.');
   } catch (e) {
     debugPrint('Error al fijar mensaje privado: $e');
     throw Exception('No se pudo fijar el mensaje.');
   }
 }
+
 
 
   // Desfijar un mensaje en una sala
