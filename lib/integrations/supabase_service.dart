@@ -280,31 +280,24 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
 
   // Fijar un mensaje en una sala
   Future<void> pinMessage(String roomId, String messageId) async {
-    final userId = currentUserId;
-    if (userId == null) {
-      throw Exception('Usuario no autenticado para fijar mensaje.');
-    }
+  final userId = currentUserId;
+  if (userId == null) return;
 
-    try {
-      // Eliminar cualquier mensaje previamente fijado en esta sala
-      await client
-          .from('chat_pinned_messages')
-          .delete()
-          .eq('room_id', roomId);
+  try {
+    // Al usar upsert con onConflict, Supabase pisa el registro viejo en un solo paso
+    await client.from('chat_pinned_messages').upsert({
+      'room_id': roomId,
+      'message_id': messageId,
+      'user_id': userId,
+    }, onConflict: 'room_id,user_id'); 
 
-      // Insertar el nuevo mensaje fijado
-      await client.from('chat_pinned_messages').insert({
-        'user_id': userId, // El usuario que fijó el mensaje
-        'room_id': roomId,
-        'message_id': messageId,
-        'pinned_at': DateTime.now().toIso8601String(),
-      });
-      debugPrint('Mensaje $messageId fijado con éxito en la sala $roomId');
-    } catch (e) {
-      debugPrint('Error al fijar el mensaje: $e');
-      throw Exception('No se pudo fijar el mensaje.');
-    }
+    debugPrint('✅ Mensaje privado fijado/reemplazado con éxito en la sala $roomId');
+  } catch (e) {
+    debugPrint('Error al fijar mensaje privado: $e');
+    throw Exception('No se pudo fijar el mensaje.');
   }
+}
+
 
   // Desfijar un mensaje en una sala
   Future<void> unpinMessage(String roomId) async {

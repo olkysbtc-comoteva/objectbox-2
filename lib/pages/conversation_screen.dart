@@ -36,7 +36,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final ValueNotifier<ChatMessage?> _pinnedMessageNotifier = ValueNotifier<ChatMessage?>(null);
   final TextEditingController _messageController = TextEditingController();
   static const Color amberPremium = Color(0xFFD4AF37);
-  DateTime _ultimaActualizacionFijado = DateTime.now();
+  
 
   static const String _fontStorageKey = 'chat_bubble_font_size';
   double _fontSizeBurbuja = 16.0;
@@ -69,33 +69,27 @@ void initState() {
 
     // Cambiá el bloque de escucha de tu initState por este:
   _pinnedMessageSubscription = _pinnedStream.listen((message) {
-  // 1. Capturamos el momento exacto en el que entra este evento de red
-  final momentoEmision = DateTime.now();
-
-  // 2. Si este evento se generó antes de nuestra última acción (como presionar el botón), lo destruimos
-  if (momentoEmision.isBefore(_ultimaActualizacionFijado)) {
-    debugPrint('⏳ Ignorando evento viejo del stream para evitar regreso al pasado');
-    return;
-  }
-
+  // Si llega null (porque el usuario apretó el botón de borrar), limpiamos la UI
   if (message == null) {
-    debugPrint('🎨 UI LISTEN: El backend confirma que está vacío.');
+    debugPrint('🎨 UI LISTEN: El backend confirma que está vacío (desfijado).');
     _pinnedMessage = null;
     _pinnedMessageNotifier.value = null;
     return;
   }
 
+  // Filtro anti-repetición básico (opcional, solo para optimizar renderizados idénticos)
   if (_pinnedMessage != null && message.id == _pinnedMessage!.id) {
-    debugPrint('🚫 UI LISTEN: Mensaje idéntico bloqueado.');
     return; 
   }
 
-  debugPrint('🎨 UI LISTEN: Renderizando mensaje fijado legítimo: ${message.content}');
+  // Renderizado directo del mensaje legítimo (sin baches intermedios)
+  debugPrint('🎨 UI LISTEN: Actualizando mensaje fijado: ${message.content}');
   _pinnedMessage = message; 
   _pinnedMessageNotifier.value = message; 
 }, onError: (error) {
   debugPrint('Error en el stream de mensajes fijados: $error');
 });
+
 
 
       
