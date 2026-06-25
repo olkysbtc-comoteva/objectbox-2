@@ -56,6 +56,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
 void initState() {
   super.initState();
   _cargarPreferenciaTamano();
+  
+  _inicializarStreamFijado();
 
   if (widget.chatRoom != null) {
     _contactName = widget.chatRoom?.otherUser?.displayName;
@@ -63,32 +65,38 @@ void initState() {
     _fetchContactDetails();
   }
 
-  // 1. Guardamos la instancia del stream fija una sola vez
-  _pinnedStream = SupabaseService().getPinnedMessageStream(widget.roomId);
   
 
-    // Cambiá el bloque de escucha de tu initState por este:
+
+void _inicializarStreamFijado() {
+  // Cancelamos cualquier escucha previa para evitar fugas de memoria o streams congelados
+  _pinnedMessageSubscription?.cancel();
+  
+  _pinnedStream = SupabaseService().getPinnedMessageStream(widget.roomId);
+  
   _pinnedMessageSubscription = _pinnedStream.listen((message) {
-  // Si llega null (porque el usuario apretó el botón de borrar), limpiamos la UI
-  if (message == null) {
-    debugPrint('🎨 UI LISTEN: El backend confirma que está vacío (desfijado).');
-    _pinnedMessage = null;
-    _pinnedMessageNotifier.value = null;
-    return;
-  }
+    if (!mounted) return;
+    
+    if (message == null) {
+      debugPrint('🎨 UI LISTEN: El backend confirma que está vacío (desfijado).');
+      setState(() {
+        _pinnedMessage = null;
+        _pinnedMessageNotifier.value = null;
+      });
+      return;
+    }
 
-  // Filtro anti-repetición básico (opcional, solo para optimizar renderizados idénticos)
-  if (_pinnedMessage != null && message.id == _pinnedMessage!.id) {
-    return; 
-  }
-
-  // Renderizado directo del mensaje legítimo (sin baches intermedios)
-  debugPrint('🎨 UI LISTEN: Actualizando mensaje fijado: ${message.content}');
-  _pinnedMessage = message; 
-  _pinnedMessageNotifier.value = message; 
-}, onError: (error) {
-  debugPrint('Error en el stream de mensajes fijados: $error');
-});
+    debugPrint('🎨 UI LISTEN: Actualizando mensaje fijado en tiempo real: ${message.content}');
+    
+    // Forzamos el redibujado de la pantalla con el nuevo mensaje al instante
+    setState(() {
+      _pinnedMessage = message; 
+      _pinnedMessageNotifier.value = message;
+    });
+  }, onError: (error) {
+    debugPrint('Error en el stream de mensajes fijados: $error');
+  });
+}
 
 
 
@@ -394,15 +402,52 @@ void initState() {
         leading: const Icon(Icons.push_pin, color: Colors.amber),
         title: const Text('Fijar mensaje'),
         onTap: () async {
-          Navigator.pop(context);
-          await SupabaseService().pinMessage(widget.roomId, message.id);
-          _pinnedMessageNotifier.value = message; // Fuerza actualización visual
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Mensaje fijado.')),
-            );
-          }
-        }, // <-- Aquí cerramos bien el onTap
+  // 1. Cerramos el menú flotante o modal inmediatamente
+  Navigator.pop(context);
+  
+  // 2. RESPUESTA INMEDIATA (Optimistic Update): 
+  // Forzamos el renderizado en la UI usando los datos locales que ya tenemos en memoria
+  if (mounted) {
+    setState(() {
+      _pinnedMessage = message;
+      _pinnedMessageNotifier.value = message;
+    });
+    debugPrint('🎨 UI OPTIMISTIC: Mostrando nuevo mensaje fijado al instante en pantalla');
+  }
+
+  // 3. Enviamos los datos al servidor de Supabase en segundo plano
+  try {
+    await SupabaseService().pinMessage(widget.roomId, message.id);
+    
+    // 4. ¡EL SEGURO ANTI-CONGELAMIENTO!: 
+    // Reiniciamos la escucha del Stream para asegurarnos de que la tubería 
+    // WebSocket quede perfectamente sintonizada con el nuevo estado del servidor
+    if (mounted) {
+      _inicializarStreamFijado();
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Mensaje fijado con éxito.')),
+      );
+    }
+  } catch (e) {
+    debugPrint('❌ Error al guardar el mensaje fijado en el backend: $e');
+    
+    // 5. REVERSIÓN EN CASO DE ERROR (Rollback):
+    // Si el servidor falla (ej. sin internet), volvemos el estado a null para no mentirle al usuario
+    if (mounted) {
+      setState(() {
+        _pinnedMessage = null;
+        _pinnedMessageNotifier.value = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error de conexión. No se pudo fijar.')),
+      );
+    }
+  }
+},
+ // <-- Aquí cerramos bien el onTap
       ),
     );
   }
