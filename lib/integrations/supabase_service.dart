@@ -247,6 +247,7 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
       .from('chat_pinned_messages')
       .stream(primaryKey: ['id']) 
       .eq('room_id', roomId)
+      .eq('user_id', userId) // <--- OBLIGATORIO: Filtra para ver solo tu fijado privado
       .limit(1) 
       .asyncMap<ChatMessage?>((data) async {
         if (data.isEmpty) return null; 
@@ -273,6 +274,7 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
         }
       });
 }
+
 
 
 
