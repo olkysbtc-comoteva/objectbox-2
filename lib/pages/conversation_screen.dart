@@ -32,7 +32,7 @@ class ConversationScreen extends StatefulWidget {
 
 class _ConversationScreenState extends State<ConversationScreen> {
   final ScrollController _scrollController = ScrollController();
-  Stream<ChatMessage?> _pinnedStream; // <-- Instancia única fija
+  Stream<ChatMessage?>? _pinnedStream; // <-- Instancia única fija
   final ValueNotifier<ChatMessage?> _pinnedMessageNotifier = ValueNotifier<ChatMessage?>(null);
   final TextEditingController _messageController = TextEditingController();
   static const Color amberPremium = Color(0xFFD4AF37);
