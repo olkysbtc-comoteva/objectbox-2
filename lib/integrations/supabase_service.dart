@@ -244,43 +244,25 @@ Stream<ChatMessage?> getPinnedMessageStream(String roomId) {
   if (userId == null) return Stream<ChatMessage?>.value(null);
   
   return client
-      .from('chat_pinned_messages')
-      .stream(primaryKey: ['id']) // 1. Escucha en tiempo real basada en el ID primario
-      .eq('room_id', roomId)      // 2. ÚNICO FILTRO PERMITIDO POR EL SDK
-      .order('id')                // 3. Forzamos un orden estable para evitar saltos de índice
-      .limit(2)                   // Traemos tu fijado y el de la otra persona
-      .asyncMap<ChatMessage?>((data) async {
-        if (data.isEmpty) return null; 
+      .from('v_user_pinned_messages')
+      .stream(primaryKey: ['id']) 
+      .eq('pinned_room_id', roomId) // OJO: Usamos el nuevo nombre de la vista
+      .limit(2)
+      .map<ChatMessage?>((data) {
+        if (data.isEmpty) return null;
         
-        // FILTRO LOCAL EN DART: Buscamos tu registro de forma manual
-        final miFijadoPrivado = data.firstWhere(
-          (row) => row['user_id'] == userId,
-          orElse: () => <String, dynamic>{}, 
+        // Filtro local instantáneo con el nombre corregido
+        final miFijado = data.firstWhere(
+          (row) => row['pinned_user_id'] == userId, // OJO: Cambiado a pinned_user_id
+          orElse: () => <String, dynamic>{},
         );
 
-        if (miFijadoPrivado.isEmpty) return null;
-
-        final messageId = miFijadoPrivado['message_id'] as String?;
-        if (messageId == null) return null;
-
-        try {
-          // Buscamos el contenido real del mensaje en la tabla de mensajes
-          final messageResponse = await client
-              .from('messages')
-              .select()
-              .eq('id', messageId)
-              .maybeSingle();
-
-          if (messageResponse != null) {
-            return ChatMessage.fromJson(messageResponse);
-          }
-          return null;
-        } catch (e) {
-          debugPrint('Error asíncrono en mensaje fijado: $e');
-          return null;
-        }
+        if (miFijado.isEmpty) return null;
+        
+        return ChatMessage.fromJson(miFijado);
       });
 }
+
 
 
 
