@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - fijarjueves
+      - offline
       
 jobs:
   build:
@@ -27,16 +27,12 @@ jobs:
 
       # ** AÑADE ESTE BLOQUE: Decodifica y coloca el google-services.json **
       - name: Decode Google Services JSON
-        # Guarda el archivo google-services.json directamente en la carpeta android/app/
-        # Esta es la ubicación que Gradle espera para el plugin de Google Services.
         run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 --decode > android/app/google-services.json
 
       - name: Decode Keystore
-        # Guardamos el archivo .jks directamente en la carpeta android/app/
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/upload-keystore.jks
 
       - name: Create key.properties
-        # La ruta 'upload-keystore.jks' es relativa a la carpeta 'app', por eso quitamos el 'app/' anterior
         run: |
           echo "keyAlias=${{ secrets.KEY_ALIAS }}" > android/key.properties
           echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
@@ -45,10 +41,21 @@ jobs:
 
       # SUGERENCIA: Añadir flutter clean para mayor robustez
       - name: Clean Flutter project
-        run: flutter clean
+        run: | 
+          flutter clean
+          flutter pub cache repair
 
       - name: Install dependencies
-        run: flutter pub get
+        run: | 
+          flutter pub get
+          flutter pub upgrade
+
+      # 🚨 NUEVO: Limpieza y generación de archivos automáticos (*.g.dart) para json_serializable sin flags obsoletas 🚨
+      - name: Run Build Runner Clean
+        run: flutter pub run build_runner clean
+
+      - name: Run Build Runner Build
+        run: flutter pub run build_runner build --delete-conflicting-outputs
 
       - name: Build APK (Optimized)
         run: flutter build apk --release --split-per-abi
