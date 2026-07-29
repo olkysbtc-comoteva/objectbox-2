@@ -321,7 +321,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     final room = await SupabaseService()
                                         .startChatWithDynamicToken(rawValue);
                                     if (room != null && mounted) {
-                                      context.push('/chat/${room.id}', extra: room);
+                                      context.push('/chat/${room.supabaseId}', extra: room);
                                     }
                                   } catch (e) {
                                     if (mounted) {
@@ -363,7 +363,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   final room = await SupabaseService()
                                       .startChatWithDynamicToken(rawValue);
                                   if (room != null && mounted) {
-                                    context.push('/chat/${room.id}', extra: room);
+                                    context.push('/chat/${room.supabaseId}', extra: room);
                                   }
                                 }
                               } else {

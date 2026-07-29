@@ -25,9 +25,14 @@ dependencies:
   firebase_messaging: ^15.0.0
   flutter_local_notifications: 17.2.1
   cached_network_image: ^3.3.1
+  objectbox: ^2.4.0 # Verifica la última versión estable
+  objectbox_flutter_libs: ^2.4.0
+  connectivity_plus: ^6.0.0 # O la versión compatible con tu Flutter
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  objectbox_generator: ^2.4.0 # Verifica la última versión estable
+  build_runner: ^2.4.6
 flutter:
   uses-material-design: true

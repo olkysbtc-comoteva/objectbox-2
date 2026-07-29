@@ -1,4 +1,6 @@
 // chat_list_screen.dart
+// Importa tu archivo main para que las pantallas reconozcan la variable global
+import 'package:comoteva/main.dart';
 
 import 'package:flutter/material.dart';
 import 'package:nowa_runtime/nowa_runtime.dart';
@@ -47,7 +49,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   void _confirmarEliminacionChat(BuildContext context, ChatRoom room) {
     HapticFeedback.mediumImpact();
     final theme = Theme.of(context);
-    final nombreContacto = room.otherUser?.displayName ?? 'este usuario';
+    final nombreContacto = room.otherUser.target?.displayName ?? 'este usuario'; // Acceso a ToOne
 
     showDialog(
       context: context,
@@ -94,10 +96,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
             ),
             onPressed: () async {
               Navigator.pop(context);
-              await SupabaseService().deleteRoom(room.id);
+              // Llamar a la versión offline-first
+              await SupabaseService().deleteRoom(room.supabaseId);
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Conversación eliminada con éxito')),
+                const SnackBar(content: Text('Conversación marcada para eliminación.')),
               );
             },
             child: const Text('Eliminar de todos modos'),
@@ -111,6 +114,45 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Widget build(BuildContext context) {
     final appState = AppState.of(context);
     final theme = Theme.of(context);
+    
+    // 🔥 VALIDACIÓN INTEGRADA CON TU LOGO: Mantiene la estética de la imagen enviada
+    if (objectbox == null) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF070708), // El color de fondo negro/oscuro de tu app
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Contenedor cuadrado con tu logo del doble check
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF161522), // El tono morado/oscuro de fondo del logo
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.done_all, // Icono nativo de doble check estilo WhatsApp
+                  color: Color(0xFF7A7893), // Color grisáceo del icono original
+                  size: 40,
+                ),
+              ),
+              const SizedBox(height: 24),
+              // Indicador de carga sutil abajo con tus colores
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    
     return Scaffold(
       body: RefreshIndicator(
         color: theme.colorScheme.primary,
@@ -254,13 +296,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 return SliverList(
                   delegate: SliverChildBuilderDelegate((context, index) {
                     final room = rooms[index];
-                    final otherUser = room.otherUser;
+                    final otherUser = room.otherUser.target; // Acceso a ToOne
+                    final lastMessage = room.lastMessage.target; // Acceso a ToOne
+
+                    // Si la sala está marcada para eliminación, no la mostramos
+                    if (room.isDeletePending) return const SizedBox.shrink();
+
                     return ListTile(
                       // Al hacer tap, ya se pasa el objeto 'room' completo como 'extra',
                       // lo cual es ideal para que ConversationScreen acceda a backgroundImageUrl.
                       onTap: () async {
   // 1. Abre el chat y espera a que el usuario regrese
-  await context.push('/chat/${room.id}', extra: room);
+  await context.push('/chat/${room.supabaseId}', extra: room);
   
   // 2. Al regresar, refrescamos el Stream automáticamente sin que el usuario estire la pantalla
   debugPrint('Regresó del chat. Actualizando estado de lectura...');
@@ -303,9 +350,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if (room.lastMessage != null)
+                          if (lastMessage != null)
                             Text(
-                              DateFormat('HH:mm').format(room.lastMessage!.createdAt),
+                              DateFormat('HH:mm').format(lastMessage.createdAt),
                               style: const TextStyle(
                                 color: AppTheme.secondaryText,
                                 fontSize: 13,
@@ -316,10 +363,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       subtitle: Padding(
                         padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                          room.lastMessage?.content ?? 'Chat nuevo',
+                          lastMessage?.content ?? 'Chat nuevo',
                           style: TextStyle(
-                            color: room.lastMessage?.isRead == false &&
-                                    room.lastMessage?.senderId != _currentUserId
+                            color: lastMessage?.isRead == false &&
+                                    lastMessage?.senderId != _currentUserId
                                 ? theme.colorScheme.primary
                                 : AppTheme.secondaryText,
                             fontSize: 15,
@@ -347,9 +394,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // --- Método para pre-cargar los fondos de chat ---
   void _precacheChatBackgrounds(List<ChatRoom> rooms, BuildContext context) {
     for (var room in rooms) {
-      // --- IMPORTANTE: Asumo que tu modelo 'ChatRoom' tiene un campo 'backgroundImageUrl' ---
-      // Si no es así, DEBERÁS añadir 'String? backgroundImageUrl;' a tu clase ChatRoom
-      // y asegurarte de que tu SupabaseService lo obtenga y lo incluya en la creación del objeto ChatRoom.
       final String? backgroundUrl = room.backgroundImageUrl;
 
       if (backgroundUrl != null && backgroundUrl.isNotEmpty && !_precachedImageUrls.contains(backgroundUrl)) {
@@ -360,11 +404,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
               if (mounted) { // Asegura que el widget sigue montado antes de actualizar el estado
                 _precachedImageUrls.add(backgroundUrl);
                 // Si quieres ver las precargas, puedes descomentar la siguiente línea:
-                // debugPrint('Precargada imagen para chat ID ${room.id} (${room.otherUser?.displayName ?? 'Desconocido'}): $backgroundUrl');
+                // debugPrint('Precargada imagen para chat ID ${room.supabaseId} (${room.otherUser?.displayName ?? 'Desconocido'}): $backgroundUrl');
               }
             })
             .catchError((error) {
-              debugPrint('Error precargando imagen para chat ID ${room.id} ($backgroundUrl): $error');
+              debugPrint('Error precargando imagen para chat ID ${room.supabaseId} ($backgroundUrl): $error');
             });
         } catch (e) {
           debugPrint('Error al crear CachedNetworkImageProvider para URL $backgroundUrl: $e');

@@ -1,4 +1,7 @@
-import 'dart:async'; // NUEVO: Importar para StreamSubscription
+import 'dart:async';
+// Importa tu archivo main para que las pantallas reconozcan la variable global
+import 'package:comoteva/main.dart';
+
 import 'dart:io';
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
@@ -14,7 +17,11 @@ import 'package:comoteva/integrations/supabase_service.dart';
 import 'package:comoteva/models/chat_room.dart';
 import 'package:comoteva/models/chat_message.dart';
 import 'package:comoteva/globals/app_state.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image/cached_network_image.dart'; // CORREGIDO: Importación correcta
+
+import 'package:comoteva/objectbox.g.dart'; // Asegúrate de importar esto
+import 'package:objectbox/objectbox.dart'; // Importa esto para usar Order, etc.
+
 
 class ConversationScreen extends StatefulWidget {
   final String roomId;
@@ -32,11 +39,10 @@ class ConversationScreen extends StatefulWidget {
 
 class _ConversationScreenState extends State<ConversationScreen> {
   final ScrollController _scrollController = ScrollController();
-  Stream<ChatMessage?>? _pinnedStream; // <-- Instancia única fija
   final ValueNotifier<ChatMessage?> _pinnedMessageNotifier = ValueNotifier<ChatMessage?>(null);
   final TextEditingController _messageController = TextEditingController();
   static const Color amberPremium = Color(0xFFD4AF37);
-  
+
 
   static const String _fontStorageKey = 'chat_bubble_font_size';
   double _fontSizeBurbuja = 16.0;
@@ -45,65 +51,71 @@ class _ConversationScreenState extends State<ConversationScreen> {
   String? _contactName;
   bool _isLoadingName = false;
 
-  ChatMessage? _replyingToMessage; // Mensaje al que se está respondiendo
-  ChatMessage? _pinnedMessage;     // NUEVO: Mensaje fijado
-  StreamSubscription? _pinnedMessageSubscription; // NUEVO: Suscripción para el mensaje fijado
+  ChatMessage? _replyingToMessage;
+  ChatMessage? _pinnedMessage; // Actualizado directamente por el stream
+  StreamSubscription? _pinnedMessageSubscription;
 
-  // NUEVO: Mapa para almacenar GlobalKeys por message.id para el scroll
   final Map<String, GlobalKey> _messageKeys = {};
 
-void _inicializarStreamFijado() {
-  // 1. Cancelamos la escucha anterior si existía
-  _pinnedMessageSubscription?.cancel();
-  
-  // 2. Asignamos el nuevo flujo (ahora sí permite sobreescribirse sin el error 'late')
-  _pinnedStream = SupabaseService().getPinnedMessageStream(widget.roomId);
-  
-  // 3. Escuchamos el flujo de forma segura usando el operador de acceso seguro '?'
-  _pinnedMessageSubscription = _pinnedStream?.listen((message) {
-    if (!mounted) return;
-    
-    if (message == null) {
-      setState(() {
-        _pinnedMessage = null;
-        _pinnedMessageNotifier.value = null;
-      });
-      return;
-    }
+  final SupabaseService _supabaseService = SupabaseService(); // Usar instancia del singleton
 
-    setState(() {
-      _pinnedMessage = message; 
-      _pinnedMessageNotifier.value = message;
+  void _inicializarStreamFijado() {
+    _pinnedMessageSubscription?.cancel();
+
+    if (objectbox == null) return;
+
+    final roomBox = objectbox!.store.box<ChatRoom>();
+    final messageBox = objectbox!.store.box<ChatMessage>();
+
+    // SOLUCIÓN: Eliminamos el .build() para mantener el QueryBuilder y poder usar .watch()
+    final roomQueryBuilder = roomBox.query(ChatRoom_.supabaseId.equals(widget.roomId));
+
+    // .watch() se invoca sobre el QueryBuilder, construye la consulta internamente y emite el stream
+    _pinnedMessageSubscription = roomQueryBuilder
+    .watch(triggerImmediately: true)
+    .map((query) => query.find()) // Transforma la Query en List<ChatRoom> ejecutando .find()
+    .listen((List<ChatRoom> roomsList) {
+      ChatRoom? room;
+      if (roomsList.isNotEmpty) {
+        room = roomsList.first;
+      }
+      ChatMessage? localPinnedMessage;
+
+      if (room?.pinnedMessageId != null) {
+        final msgQuery = (messageBox.query(ChatMessage_.supabaseId.equals(room!.pinnedMessageId!))).build();
+        localPinnedMessage = msgQuery.findFirst();
+        msgQuery.close();
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _pinnedMessage = localPinnedMessage;
+        _pinnedMessageNotifier.value = localPinnedMessage;
+      });
+    }, onError: (error) {
+      debugPrint('Error en el stream local de mensajes fijados: $error');
     });
-  }, onError: (error) {
-    debugPrint('Error en el stream de mensajes fijados: $error');
-  });
-}
+  }
 
 
 
   @override
-void initState() {
-  super.initState();
-  _cargarPreferenciaTamano();
-  
-  _inicializarStreamFijado();
+  void initState() {
+    super.initState();
+    _cargarPreferenciaTamano();
 
-  if (widget.chatRoom != null) {
-    _contactName = widget.chatRoom?.otherUser?.displayName;
-  } else {
-    _fetchContactDetails();
-  }
+    _inicializarStreamFijado();
 
-  
+    // Iniciar la escucha de mensajes para esta sala a través de SupabaseService
+    _supabaseService.startListeningToRoomMessages(widget.roomId);
 
+    if (widget.chatRoom != null) {
+      _contactName = widget.chatRoom?.otherUser.target?.displayName; // Acceso a ToOne
+    } else {
+      _fetchContactDetails();
+    }
 
-
-
-
-
-      
-   
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
         final appState = AppState.of(context, listen: false);
@@ -113,12 +125,12 @@ void initState() {
           appState.setChatWallpaper(initialBackgroundUrl);
           debugPrint('Fondo inicial establecido desde ChatRoom: $initialBackgroundUrl');
         } else {
-          final fondoActivo = await SupabaseService().getActiveChatBackground(widget.roomId);
+          final fondoActivo = await _supabaseService.getActiveChatBackground(widget.roomId); // Usar _supabaseService
           if (fondoActivo != null && mounted) {
             appState.setChatWallpaper(fondoActivo['url'] as String?);
-            debugPrint('Fondo activo establecido desde Supabase: ${fondoActivo['url']}');
+            debugPrint('Fondo activo establecido desde Supabase/ObjectBox: ${fondoActivo['url']}');
           } else {
-            final fondos = await SupabaseService().getAvailableWallpapers();
+            final fondos = await _supabaseService.getAvailableWallpapers(); // Usar _supabaseService
             if (fondos.isNotEmpty && mounted && appState.currentChatWallpaper == null) {
               appState.setChatWallpaper(fondos.first['url'] as String?);
               debugPrint('Fondo por defecto establecido: ${fondos.first['url']}');
@@ -133,8 +145,9 @@ void initState() {
   void dispose() {
     _scrollController.dispose();
     _messageController.dispose();
-    _pinnedMessageSubscription?.cancel(); // NUEVO: Cancelar suscripción del mensaje fijado
+    _pinnedMessageSubscription?.cancel();
     _pinnedMessageNotifier.dispose();
+    _supabaseService.stopListeningToRoomMessages(widget.roomId); // Detener la escucha al salir
     super.dispose();
   }
 
@@ -143,30 +156,23 @@ void initState() {
     setState(() => _isLoadingName = true);
 
     try {
-      final supabase = Supabase.instance.client;
-      final currentUserId = supabase.auth.currentUser?.id;
+      final currentUserId = _supabaseService.currentUserId; // Usar _supabaseService
 
       if (currentUserId == null) throw Exception("Usuario no autenticado");
 
-      final data = await supabase
-          .from('room_members')
-          .select('profiles:user_id(nombre)')
-          .eq('room_id', widget.roomId)
-          .neq('user_id', currentUserId)
-          .maybeSingle();
+      // Intenta obtener la sala desde el stream de ObjectBox (que es actualizado por Supabase)
+      final roomFromService = await _supabaseService.getMyRoomsStream()
+          .firstWhere((rooms) => rooms.any((r) => r.supabaseId == widget.roomId)) // Usar supabaseId
+          .then((rooms) => rooms.firstWhere((r) => r.supabaseId == widget.roomId, orElse: () => throw Exception('Room not found'))); // Usar supabaseId
 
       if (mounted) {
         setState(() {
-          if (data != null && data['profiles'] != null) {
-            _contactName = data['profiles']['nombre'] ?? 'Usuario';
-          } else {
-            _contactName = "Chat";
-          }
+          _contactName = roomFromService.otherUser.target?.displayName ?? "Chat"; // Acceso a ToOne
           _isLoadingName = false;
         });
       }
     } catch (e) {
-      debugPrint('Error al traer datos del contacto de Supabase: $e');
+      debugPrint('Error al traer datos del contacto de Supabase/ObjectBox: $e');
       if (mounted) {
         setState(() {
           _contactName = "Chat";
@@ -205,30 +211,28 @@ void initState() {
     try {
       final String nombreArchivo = 'gif_${DateTime.now().millisecondsSinceEpoch}.gif';
 
-      await Supabase.instance.client.storage
-          .from('temporary_media')
-          .uploadBinary(
-            'gifs/$nombreArchivo',
-            contenido.data!,
-          );
-
-      final String urlPublicaFinal = Supabase.instance.client.storage
-          .from('temporary_media')
-          .getPublicUrl('gifs/$nombreArchivo');
-
-      // Modificado para incluir datos de respuesta si existe
-      await SupabaseService().sendMessage(
-        widget.roomId,
-        urlPublicaFinal,
-        type: 'gif',
-        replyToMessageId: _replyingToMessage?.id,
-        replyToContent: _replyingToMessage?.content,
-        replyToSenderId: _replyingToMessage?.senderId,
+      final String? publicUrlFinal = await _supabaseService.uploadMedia( // Usar _supabaseService
+        contenido.data!,
+        nombreArchivo,
+        roomId: widget.roomId,
       );
-      _messageController.clear();
-      setState(() {
-        _replyingToMessage = null; // Limpiar estado de respuesta
-      });
+
+      if (publicUrlFinal != null) {
+        await _supabaseService.sendMessage( // Usar _supabaseService
+          widget.roomId,
+          publicUrlFinal,
+          type: 'gif',
+          replyToMessageId: _replyingToMessage?.supabaseId, // Usar supabaseId
+          replyToContent: _replyingToMessage?.content,
+          replyToSenderId: _replyingToMessage?.senderId,
+        );
+        _messageController.clear();
+        setState(() {
+          _replyingToMessage = null;
+        });
+      } else {
+        throw Exception("Fallo al obtener URL pública para el GIF");
+      }
     } catch (error) {
       debugPrint("Error al procesar o subir el GIF del teclado: $error");
       if (mounted) {
@@ -346,7 +350,9 @@ void initState() {
   }
 
   void _onMessageTap(ChatMessage message) {
-    final isMe = message.senderId == SupabaseService().currentUserId;
+    // Aquí recuperas el ID del usuario actual de tu servicio
+    final currentUserId = _supabaseService.currentUserId;
+    final isMe = message.senderId == currentUserId;
     final isVideo = message.messageType == 'video';
     final isImage = message.messageType == 'image';
     final isGif = message.messageType == 'gif';
@@ -364,13 +370,12 @@ void initState() {
       ),
       ListTile(
         leading: const Icon(Icons.reply, color: Colors.green),
-        title: const Text('Responder mensaje'), // Cambiado de "Reenviar mensaje"
+        title: const Text('Responder mensaje'),
         onTap: () {
           Navigator.pop(context);
           setState(() {
-            _replyingToMessage = message; // Establecer el mensaje al que se responde
+            _replyingToMessage = message;
           });
-          // Desplazarse al final para mostrar la barra de respuesta
           _scrollController.animateTo(
             0.0,
             duration: const Duration(milliseconds: 300),
@@ -380,79 +385,75 @@ void initState() {
       ),
     ];
 
-    // NUEVO: Opciones de fijar/desfijar
-    if (_pinnedMessage?.id == message.id) {
-    options.add(
-      ListTile(
-        leading: const Icon(Icons.push_pin_outlined, color: Colors.red),
-        title: const Text('Desfijar mensaje'),
-        onTap: () async {
-          Navigator.pop(context);
-          await SupabaseService().unpinMessage(widget.roomId);
-          _pinnedMessageNotifier.value = null; // Fuerza desaparición visual
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Mensaje desfijado.')),
-            );
-          }
-        }, // <-- Aquí cerramos bien el onTap
-      ),
-    );
-  } else {
-    options.add(
-      ListTile(
-        leading: const Icon(Icons.push_pin, color: Colors.amber),
-        title: const Text('Fijar mensaje'),
-        onTap: () async {
-  // 1. Cerramos el menú flotante o modal inmediatamente
-  Navigator.pop(context);
-  
-  // 2. RESPUESTA INMEDIATA (Optimistic Update): 
-  // Forzamos el renderizado en la UI usando los datos locales que ya tenemos en memoria
-  if (mounted) {
-    setState(() {
-      _pinnedMessage = message;
-      _pinnedMessageNotifier.value = message;
-    });
-    debugPrint('🎨 UI OPTIMISTIC: Mostrando nuevo mensaje fijado al instante en pantalla');
-  }
+    if (_pinnedMessage?.supabaseId == message.supabaseId) {
+      options.add(
+        ListTile(
+          leading: const Icon(Icons.push_pin_outlined, color: Colors.red),
+          title: const Text('Desfijar mensaje'),
+          onTap: () async {
+            Navigator.pop(context);
 
-  // 3. Enviamos los datos al servidor de Supabase en segundo plano
-  try {
-    await SupabaseService().pinMessage(widget.roomId, message.id);
-    
-    // 4. ¡EL SEGURO ANTI-CONGELAMIENTO!: 
-    // Reiniciamos la escucha del Stream para asegurarnos de que la tubería 
-    // WebSocket quede perfectamente sintonizada con el nuevo estado del servidor
-    if (mounted) {
-      _inicializarStreamFijado();
-    }
+            // 1. Limpieza visual inmediata en pantalla (UI Optimista)
+            setState(() {
+              _pinnedMessage = null;
+              _pinnedMessageNotifier.value = null;
+            });
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Mensaje fijado con éxito.')),
+            // 2. Ejecución offline-first enviando messageId como null para remover el pin
+            if (currentUserId != null) {
+              await _supabaseService.fijarMensajeOffline(
+  roomId: widget.roomId,
+  userId: currentUserId,
+  messageId: null, // Indicar desfijar
+);
+
+            }
+
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Mensaje desfijado.')),
+              );
+            }
+          },
+        ),
+      );
+    } else {
+      options.add(
+        ListTile(
+          leading: const Icon(Icons.push_pin, color: Colors.amber),
+          title: const Text('Fijar mensaje'),
+          onTap: () async {
+            Navigator.pop(context);
+
+            // 1. UI OPTIMISTIC: Mostramos el mensaje fijado al instante en la app
+            if (mounted) {
+              setState(() {
+                _pinnedMessage = message;
+                _pinnedMessageNotifier.value = message;
+              });
+              debugPrint('🎨 UI OPTIMISTIC: Mostrando nuevo mensaje fijado al instante');
+            }
+
+            // 2. Persistencia local garantizada. Si está offline o el mensaje aún no se subió,
+            // se almacena en ObjectBox de forma segura sin disparar errores en la interfaz.
+            if (currentUserId != null) {
+              await _supabaseService.fijarMensajeOffline(
+  roomId: widget.roomId,
+  userId: currentUserId,
+  messageId: message.supabaseId,
+);
+            }
+
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Mensaje fijado con éxito.')),
+              );
+            }
+          },
+        ),
       );
     }
-  } catch (e) {
-    debugPrint('❌ Error al guardar el mensaje fijado en el backend: $e');
-    
-    // 5. REVERSIÓN EN CASO DE ERROR (Rollback):
-    // Si el servidor falla (ej. sin internet), volvemos el estado a null para no mentirle al usuario
-    if (mounted) {
-      setState(() {
-        _pinnedMessage = null;
-        _pinnedMessageNotifier.value = null;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error de conexión. No se pudo fijar.')),
-      );
-    }
-  }
-},
- // <-- Aquí cerramos bien el onTap
-      ),
-    );
-  }
+
 
     if (isMedia) {
       options.add(
@@ -467,11 +468,11 @@ void initState() {
                 builder: (context) => MediaPreviewScreen(
                   message: message,
                   onDownload: _downloadMediaFile,
-                  onDelete: (messageId) async {
-                    await SupabaseService().deleteMessage(messageId);
+                  onDelete: (messageSupabaseId) async {
+                    await _supabaseService.deleteMessage(messageSupabaseId); // Usar _supabaseService
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Mensaje eliminado.')),
+                        const SnackBar(content: Text('Mensaje marcado para eliminación.')),
                       );
                     }
                   },
@@ -511,10 +512,10 @@ void initState() {
           title: const Text('Eliminar para todos'),
           onTap: () async {
             Navigator.pop(context);
-            await SupabaseService().deleteMessage(message.id);
+            await _supabaseService.deleteMessage(message.supabaseId); // CORREGIDO: Usar supabaseId
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Mensaje eliminado para todos.')),
+                const SnackBar(content: Text('Mensaje marcado para eliminación.')),
               );
             }
           },
@@ -548,7 +549,7 @@ void initState() {
             return GestureDetector(
               onTap: () async {
                 Navigator.pop(context);
-                await SupabaseService().updateMessageReaction(message.id, emoji);
+                await _supabaseService.updateMessageReaction(message.supabaseId, emoji); // CORREGIDO: Usar supabaseId
               },
               child: Text(emoji, style: const TextStyle(fontSize: 28)),
             );
@@ -574,8 +575,8 @@ void initState() {
             onPressed: () async {
               if (editController.text.trim().isNotEmpty) {
                 Navigator.pop(context);
-                await SupabaseService().updateMessage(
-                  message.id,
+                await _supabaseService.updateMessage( // Usar _supabaseService
+                  message.supabaseId, // CORREGIDO: Usar supabaseId
                   editController.text.trim(),
                 );
               }
@@ -602,12 +603,17 @@ void initState() {
             Text('Tipo: ${message.messageType}'),
             const SizedBox(height: 8),
             Text('Estado: ${message.isRead == true ? "Leído" : "Entregado"}'),
-            if (message.replyToMessageId != null) ...[ // Mostrar info de respuesta
+            if (message.replyToMessageId != null) ...[
               const SizedBox(height: 8),
               const Text('Respondiendo a:', style: TextStyle(fontWeight: FontWeight.bold)),
               Text('  - Contenido: ${message.replyToContent ?? 'N/A'}'),
               Text('  - Remitente ID: ${message.replyToSenderId ?? 'N/A'}'),
             ],
+            // Mostrar los estados de sincronización pendientes
+            Text('Sincronizado: ${message.isSent ? "Sí" : "No (pendiente)"}'),
+            if (message.isUpdatePending) Text('Actualización Pendiente: Sí'),
+            if (message.isDeletePending) Text('Eliminación Pendiente: Sí'),
+            if (message.isReadPending) Text('Lectura Pendiente: Sí'),
           ],
         ),
         actions: [
@@ -620,7 +626,6 @@ void initState() {
     );
   }
 
-  // NUEVO: Helper para mostrar el contenido del mensaje respondido/fijado
   Widget _buildContentPreview(String content, String messageType, Color textColor, double fontSize) {
     if (content.startsWith('http')) {
       if (messageType == 'image') {
@@ -660,18 +665,17 @@ void initState() {
     );
   }
 
-  // Widget para la previsualización del mensaje respondido en la barra de entrada
   Widget _buildReplyPreview() {
     if (_replyingToMessage == null) return const SizedBox.shrink();
 
     final theme = Theme.of(context);
     String replySenderName;
-    if (_replyingToMessage!.senderId == SupabaseService().currentUserId) {
+    if (_replyingToMessage!.senderId == _supabaseService.currentUserId) { // Usar _supabaseService
       replySenderName = 'Tú';
-    } else if (_replyingToMessage!.senderId == widget.chatRoom?.otherUser?.id) {
+    } else if (widget.chatRoom?.otherUser.target?.supabaseId != null && _replyingToMessage!.senderId == widget.chatRoom?.otherUser.target?.supabaseId) { // CORREGIDO: Usar supabaseId y verificación de nulo
       replySenderName = _contactName ?? 'Usuario';
     } else {
-      replySenderName = 'Usuario'; // Fallback para casos no esperados en 1-a-1
+      replySenderName = 'Usuario';
     }
 
     return Container(
@@ -699,7 +703,7 @@ void initState() {
                   _replyingToMessage!.content,
                   _replyingToMessage!.messageType,
                   theme.colorScheme.onSurface.withOpacity(0.8),
-                  14.0, // Tamaño de fuente para la vista previa
+                  14.0,
                 ),
               ],
             ),
@@ -708,7 +712,7 @@ void initState() {
             icon: Icon(Icons.close, color: theme.colorScheme.onSurface.withOpacity(0.6)),
             onPressed: () {
               setState(() {
-                _replyingToMessage = null; // Limpiar estado de respuesta
+                _replyingToMessage = null;
               });
             },
           ),
@@ -717,129 +721,136 @@ void initState() {
     );
   }
 
-  // NUEVO: Widget para la barra de mensaje fijado
   Widget _buildPinnedMessageBanner() {
-  if (_pinnedMessage == null) return const SizedBox.shrink();
+    if (_pinnedMessage == null) return const SizedBox.shrink();
 
-  final theme = Theme.of(context);
-  // Color de ámbar/oro premium unificado
-  const Color premiumAmber = Color(0xFFD4AF37); 
+    final theme = Theme.of(context);
+    const Color premiumAmber = Color(0xFFD4AF37);
 
-  String pinnedSenderName;
-  if (_pinnedMessage!.senderId == SupabaseService().currentUserId) {
-    pinnedSenderName = 'Tú';
-  } else if (_pinnedMessage!.senderId == widget.chatRoom?.otherUser?.id) {
-    pinnedSenderName = _contactName ?? 'Usuario';
-  } else {
-    pinnedSenderName = 'Usuario';
-  }
-
-  return ClipRect(
-    child: GestureDetector(
-      onTap: () {
-        final key = _messageKeys[_pinnedMessage!.id];
-        if (key != null && key.currentContext != null) {
-          Scrollable.ensureVisible(
-            key.currentContext!,
-            alignment: 0.5,
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        } else {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Mensaje fijado no visible, desplazando...')),
-            );
-          }
-        }
-      },
-      child: Container(
-        margin: const EdgeInsets.only(left: 12, right: 12, bottom: 8, top: 4),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                // Fondo oscuro translúcido para dar buen contraste
-                color: Colors.black.withOpacity(0.45), 
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: premiumAmber.withOpacity(0.8), 
-                  width: 1.0,
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.push_pin, color: premiumAmber, size: 18),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'Mensaje fijado',
-                          style: const TextStyle(
-                            color: premiumAmber,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 11,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        _buildContentPreview(
-                          _pinnedMessage!.content,
-                          _pinnedMessage!.messageType,
-                          Colors.white.withOpacity(0.85),
-                          13.0,
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-  icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
-  onPressed: () async {
-    HapticFeedback.lightImpact();
-    
-    // Forzamos el apagado visual instantáneo
-    _pinnedMessageNotifier.value = null;
-    _pinnedMessage = null;
-    
-    try {
-      // El borrado físico en el servidor disparará el stream y lo mantendrá en null
-      await SupabaseService().unpinMessage(widget.roomId);
-    } catch (e) {
-      debugPrint('Error al desfijar: $e');
+    String pinnedSenderName;
+    if (_pinnedMessage!.senderId == _supabaseService.currentUserId) { // Usar _supabaseService
+      pinnedSenderName = 'Tú';
+    } else if (widget.chatRoom?.otherUser.target?.supabaseId != null && _pinnedMessage!.senderId == widget.chatRoom?.otherUser.target?.supabaseId) { // CORREGIDO: Usar supabaseId y verificación de nulo
+      pinnedSenderName = _contactName ?? 'Usuario';
+    } else {
+      pinnedSenderName = 'Usuario';
     }
-  },
-),
 
+    return ClipRect(
+      child: GestureDetector(
+        onTap: () {
+          final key = _messageKeys[_pinnedMessage!.supabaseId]; // CORREGIDO: Usar supabaseId
+          if (key != null && key.currentContext != null) {
+            Scrollable.ensureVisible(
+              key.currentContext!,
+              alignment: 0.5,
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeInOut,
+            );
+          } else {
+            _scrollController.animateTo(
+              0.0,
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeInOut,
+            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Mensaje fijado no visible, desplazando...')),
+              );
+            }
+          }
+        },
+        child: Container(
+          margin: const EdgeInsets.only(left: 12, right: 12, bottom: 8, top: 4),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.45),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: premiumAmber.withOpacity(0.8),
+                    width: 1.0,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.push_pin, color: premiumAmber, size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Mensaje fijado',
+                            style: const TextStyle(
+                              color: premiumAmber,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 11,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          _buildContentPreview(
+                            _pinnedMessage!.content,
+                            _pinnedMessage!.messageType,
+                            Colors.white.withOpacity(0.85),
+                            13.0,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close, color: Colors.white.withOpacity(0.6), size: 18),
+                      onPressed: () async {
+                        HapticFeedback.lightImpact();
 
+                        // 1. Limpieza visual inmediata
+                        setState(() {
+                          _pinnedMessageNotifier.value = null;
+                          _pinnedMessage = null;
+                        });
 
+                        // 2. Persistencia local garantizada + intento remoto silencioso
+                        await _supabaseService.fijarMensajeOffline(
+                          roomId: widget.roomId,
+                          userId: _supabaseService.currentUserId ?? '', // Acceso directo al getter global del servicio
+                          messageId: null, // Indicar desfijar
+                        );
 
-                ],
+                      },
+                    ),
+
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
-}
-
-
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final appState = AppState.of(context);
     final theme = Theme.of(context);
+
+    // 🔥 VALIDACIÓN ANTICRASH DINÁMICA: Evita la pantalla blanca si entran antes de cargar ObjectBox
+    if (objectbox == null) {
+      return Scaffold(
+        backgroundColor: theme.colorScheme.surface, // Usa el fondo exacto de tu app
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(theme.colorScheme.primary), // Tu color principal
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -850,7 +861,7 @@ void initState() {
                 child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blue),
               )
             : Text(
-                _contactName ?? widget.chatRoom?.otherUser?.displayName ?? 'Chat',
+                _contactName ?? widget.chatRoom?.otherUser.target?.displayName ?? 'Chat', // Acceso a ToOne
                 style: TextStyle(color: theme.colorScheme.onSurface),
               ),
         backgroundColor: theme.scaffoldBackgroundColor.withOpacity(0.8),
@@ -881,7 +892,7 @@ void initState() {
                           SizedBox(
                             height: 160,
                             child: FutureBuilder<List<Map<String, dynamic>>>(
-                              future: SupabaseService().getAvailableWallpapers(),
+                              future: _supabaseService.getAvailableWallpapers(), // Usar _supabaseService
                               builder: (context, snapshot) {
                                 if (snapshot.connectionState == ConnectionState.waiting) {
                                   return const Center(child: CircularProgressIndicator());
@@ -902,7 +913,7 @@ void initState() {
                                     return GestureDetector(
                                       onTap: () async {
                                         appState.setChatWallpaper(wpUrl);
-                                        await SupabaseService().updateChatBackground(widget.roomId, wpId);
+                                        await _supabaseService.updateChatBackground(widget.roomId, wpId); // Usar _supabaseService
                                         if (context.mounted) Navigator.pop(context);
                                       },
                                       child: Container(
@@ -976,34 +987,39 @@ void initState() {
                   ),
                 ),
               ),
+
             Column(
-  children: [
-    ValueListenableBuilder<ChatMessage?>(
-      valueListenable: _pinnedMessageNotifier,
-      builder: (context, pinnedMessage, child) {
-        if (pinnedMessage == null) return const SizedBox.shrink();
-        return _buildPinnedMessageBanner();
-      },
-    ),
+              children: [
+                ValueListenableBuilder<ChatMessage?>(
+  valueListenable: _pinnedMessageNotifier,
+  builder: (context, pinnedMessage, child) {
+    if (pinnedMessage == null) return const SizedBox.shrink();
+    return _buildPinnedMessageBanner();
+  },
+),
+Expanded(
+  child: StreamBuilder<List<ChatMessage>>(
+    // SOLUCIÓN: Eliminamos .build() y llamamos directamente a .watch() desde el query builder
+    stream: objectbox!.store
+        .box<ChatMessage>()
+        .query(ChatMessage_.roomId.equals(widget.roomId))
+        .order(ChatMessage_.createdAt, flags: Order.descending)
+        .watch(triggerImmediately: true) // .watch() va directo aquí sin .build()
+        .map((queryResult) => queryResult.find()), // Mapea el flujo para extraer List<ChatMessage>
+    builder: (context, snapshot) {
+      if (!snapshot.hasData) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      final messages = snapshot.data ?? [];
 
-
-                Expanded(
-                  child: StreamBuilder<List<ChatMessage>>(
-                    stream: SupabaseService().getMessagesStream(widget.roomId),
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final messages = snapshot.data;
-
-                      return NotificationListener<ScrollNotification>(
-                        onNotification: (ScrollNotification notification) {
-                          if (notification.metrics.pixels < -60 && notification is ScrollUpdateNotification) {
-                            HapticFeedback.lightImpact();
-                            SupabaseService().markMessagesAsRead(widget.roomId);
-                          }
-                          return false;
-                        },
+      return NotificationListener<ScrollNotification>(
+        onNotification: (ScrollNotification notification) {
+          if (notification.metrics.pixels < -60 && notification is ScrollUpdateNotification) {
+            HapticFeedback.lightImpact();
+            _supabaseService.markMessagesAsRead(widget.roomId); 
+          }
+          return false;
+        },
                         child: ListView.builder(
                           controller: _scrollController,
                           physics: const AlwaysScrollableScrollPhysics(
@@ -1011,10 +1027,10 @@ void initState() {
                           ),
                           reverse: true,
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-                          itemCount: messages?.length ?? 0,
+                          itemCount: messages.length,
                           itemBuilder: (context, index) {
-                            final message = messages![index];
-                            final isMe = message.senderId == SupabaseService().currentUserId;
+                            final message = messages[index];
+                            final isMe = message.senderId == _supabaseService.currentUserId;
                             final isVideo = message.messageType == 'video';
                             final isImage = message.messageType == 'image';
                             final isGif = message.messageType == 'gif';
@@ -1023,23 +1039,24 @@ void initState() {
                             final tieneReaccion = message.reaction != null && message.reaction!.isNotEmpty;
                             final esLeido = message.isRead ?? false;
 
-                            // Almacenar la GlobalKey para este mensaje
-                            _messageKeys[message.id] = GlobalKey();
+                            _messageKeys[message.supabaseId] = GlobalKey();
 
-                            // Lógica para el nombre del remitente del mensaje respondido
                             String? originalReplySenderName;
                             if (message.replyToSenderId != null) {
-                              if (message.replyToSenderId == SupabaseService().currentUserId) {
+                              if (message.replyToSenderId == _supabaseService.currentUserId) {
                                 originalReplySenderName = 'Tú';
-                              } else if (message.replyToSenderId == widget.chatRoom?.otherUser?.id) {
+                              } else if (widget.chatRoom?.otherUser.target?.supabaseId != null && message.replyToSenderId == widget.chatRoom?.otherUser.target?.supabaseId) {
                                 originalReplySenderName = _contactName ?? 'Usuario';
                               } else {
-                                originalReplySenderName = 'Usuario'; // Fallback
+                                originalReplySenderName = 'Usuario';
                               }
                             }
 
-                                                        return Align(
-                              key: _messageKeys[message.id], // Asignar la GlobalKey
+                            // No mostrar mensajes marcados para eliminación
+                            if (message.isDeletePending) return const SizedBox.shrink();
+
+                            return Align(
+                              key: _messageKeys[message.supabaseId],
                               alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                               child: GestureDetector(
                                 onTap: () {
@@ -1054,15 +1071,13 @@ void initState() {
                                       padding: isMedia ? const EdgeInsets.all(4) : const EdgeInsets.fromLTRB(14, 8, 10, 6),
                                       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                                       decoration: BoxDecoration(
-                                        // 1. CAMBIO PREMIUM: Burbujas translúcidas adaptables al tema activo
-                                        color: isMe 
-                                            ? theme.primaryColor.withOpacity(0.75) // Tus mensajes (azul o coral Plus suave)
-                                            : Colors.black.withOpacity(0.68),       // Mensajes del otro usuario (cristal oscuro neutro)
+                                        color: isMe
+                                            ? theme.primaryColor.withOpacity(0.75)
+                                            : Colors.black.withOpacity(0.68),
                                         borderRadius: BorderRadius.circular(18),
-                                        // 2. BORDE ULTRA FINO: Evita que la burbuja se pierda en texturas complejas de fondo
                                         border: Border.all(
-                                          color: isMe 
-                                              ? theme.primaryColor.withOpacity(0.6) 
+                                          color: isMe
+                                              ? theme.primaryColor.withOpacity(0.6)
                                               : Colors.white.withOpacity(0.15),
                                           width: 1.0,
                                         ),
@@ -1071,51 +1086,43 @@ void initState() {
                                         crossAxisAlignment: CrossAxisAlignment.end,
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          // Previsualización del mensaje respondido
-                                          // Previsualización del mensaje respondido (Optimizado para legibilidad)
-if (message.replyToMessageId != null && message.replyToContent != null)
-  Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-    margin: const EdgeInsets.only(bottom: 6),
-    decoration: BoxDecoration(
-      // MEJORA: Aumentamos el contraste del fondo de la cajita de respuesta
-      color: isMe
-          ? Colors.white.withOpacity(0.18) // Un poco más claro si es tu burbuja
-          : Colors.black.withOpacity(0.35), // Un poco más oscuro si es la burbuja del otro
-      borderRadius: BorderRadius.circular(12),
-      border: Border(
-        left: BorderSide(
-          color: isMe ? Colors.white70 : theme.primaryColor, 
-          width: 3,
-        ),
-      ),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          originalReplySenderName ?? 'Usuario',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            // MEJORA: Blanco pleno para tus burbujas, o el color del tema bien nítido para el otro
-            color: isMe ? Colors.white : (theme.brightness == Brightness.dark ? theme.primaryColor : theme.primaryColor.withRed(255)),
-            fontSize: _fontSizeBurbuja * 0.85,
-          ),
-        ),
-        const SizedBox(height: 4),
-        // LLAMADO A LA VISTA PREVIA DEL CONTENIDO
-        _buildContentPreview(
-          message.replyToContent!,
-          message.messageType, 
-          // MEJORA CLAVE: Forzamos un blanco/gris muy claro para que el texto de fondo no se pierda jamás
-          isMe ? Colors.white.withOpacity(0.9) : Colors.white.withOpacity(0.8),
-          _fontSizeBurbuja * 0.9,
-        ),
-      ],
-    ),
-  ),
-
-
+                                          if (message.replyToMessageId != null && message.replyToContent != null)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                              margin: const EdgeInsets.only(bottom: 6),
+                                              decoration: BoxDecoration(
+                                                color: isMe
+                                                    ? Colors.white.withOpacity(0.18)
+                                                    : Colors.black.withOpacity(0.35),
+                                                borderRadius: BorderRadius.circular(12),
+                                                border: Border(
+                                                  left: BorderSide(
+                                                    color: isMe ? Colors.white70 : theme.primaryColor,
+                                                    width: 3,
+                                                  ),
+                                                ),
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    originalReplySenderName ?? 'Usuario',
+                                                    style: TextStyle(
+                                                      fontWeight: FontWeight.bold,
+                                                      color: isMe ? Colors.white : (theme.brightness == Brightness.dark ? theme.primaryColor : theme.primaryColor.withRed(255)),
+                                                      fontSize: _fontSizeBurbuja * 0.85,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  _buildContentPreview(
+                                                    message.replyToContent!,
+                                                    message.messageType,
+                                                    isMe ? Colors.white.withOpacity(0.9) : Colors.white.withOpacity(0.8),
+                                                    _fontSizeBurbuja * 0.9,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
                                           if (isImage || isGif)
                                             ClipRRect(
                                               borderRadius: BorderRadius.circular(14),
@@ -1123,13 +1130,13 @@ if (message.replyToMessageId != null && message.replyToContent != null)
                                                 imageUrl: message.content,
                                                 fit: BoxFit.cover,
                                                 placeholder: (context, url) => Container(
-                                                  height: 150, // Altura placeholder
+                                                  height: 150,
                                                   width: 150,
                                                   color: Colors.grey[300],
                                                   child: const Center(child: CircularProgressIndicator()),
                                                 ),
                                                 errorWidget: (context, url, error) => Container(
-                                                  height: 150, // Altura placeholder
+                                                  height: 150,
                                                   width: 150,
                                                   color: Colors.grey[300],
                                                   child: const Center(child: Icon(Icons.error)),
@@ -1141,7 +1148,6 @@ if (message.replyToMessageId != null && message.replyToContent != null)
                                               height: 180,
                                               decoration: BoxDecoration(
                                                 color: Colors.black87,
-
                                                 borderRadius: BorderRadius.circular(14),
                                               ),
                                               child: const Center(
@@ -1153,30 +1159,31 @@ if (message.replyToMessageId != null && message.replyToContent != null)
                                               duration: const Duration(milliseconds: 100),
                                               curve: Curves.easeOutCubic,
                                               style: TextStyle(
-                                                // Ajustamos el color para que siempre sea legible en tus burbujas o las del otro
                                                 color: isMe ? Colors.white : theme.colorScheme.onSurface,
                                                 fontSize: _fontSizeBurbuja,
                                               ),
                                               child: Text(message.content),
                                             ),
-                                          const SizedBox(height: 4), // Un poquito más de aire antes de la hora
+                                          const SizedBox(height: 4),
                                           Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
+                                              if (isMe && !message.isSent) ...[
+                                                const Icon(Icons.access_time, size: 14, color: Colors.white54),
+                                                const SizedBox(width: 4),
+                                              ],
                                               Text(
                                                 DateFormat('HH:mm').format(localTime),
                                                 style: TextStyle(
-                                                  // El texto de la hora se adapta al contraste translúcido
                                                   color: isMe ? Colors.white.withOpacity(0.65) : theme.colorScheme.onSurface.withOpacity(0.5),
                                                   fontSize: 10,
                                                 ),
                                               ),
-                                              if (isMe) ...[
+                                              if (isMe && message.isSent) ...[
                                                 const SizedBox(width: 4),
                                                 Icon(
                                                   esLeido ? Icons.done_all : Icons.done,
                                                   size: 14,
-                                                  // Si es leído brilla en blanco puro, si no, se atenúa sutilmente
                                                   color: esLeido ? Colors.white : Colors.white.withOpacity(0.5),
                                                 ),
                                               ],
@@ -1196,8 +1203,7 @@ if (message.replyToMessageId != null && message.replyToContent != null)
                                             vertical: _fontSizeBurbuja * 0.15,
                                           ),
                                           decoration: BoxDecoration(
-                                            // MEJORA PREMIUM: Reacción translúcida tipo píldora de cristal
-                                            color: Colors.black.withOpacity(0.6), 
+                                            color: Colors.black.withOpacity(0.6),
                                             borderRadius: BorderRadius.circular(_fontSizeBurbuja * 0.7),
                                             border: Border.all(
                                               color: Colors.white.withOpacity(0.12),
@@ -1229,7 +1235,6 @@ if (message.replyToMessageId != null && message.replyToContent != null)
                     },
                   ),
                 ),
-                // Mostrar la previsualización de respuesta si hay un mensaje para responder
                 if (_replyingToMessage != null) _buildReplyPreview(),
                 _buildChatBar(),
               ],
@@ -1239,7 +1244,6 @@ if (message.replyToMessageId != null && message.replyToContent != null)
       ),
     );
   }
-
 
   Widget _buildChatBar() {
     final theme = Theme.of(context);
@@ -1253,23 +1257,23 @@ if (message.replyToMessageId != null && message.replyToContent != null)
 
         if (file != null) {
           final bytes = await file.readAsBytes();
-          final publicUrl = await SupabaseService().uploadMedia(
+          final publicUrl = await _supabaseService.uploadMedia( // Usar _supabaseService
             bytes,
             file.name,
             roomId: widget.roomId,
           );
 
           if (publicUrl != null) {
-            await SupabaseService().sendMessage(
+            await _supabaseService.sendMessage( // Usar _supabaseService
               widget.roomId,
               publicUrl,
               type: type,
-              replyToMessageId: _replyingToMessage?.id,
+              replyToMessageId: _replyingToMessage?.supabaseId, // Usar supabaseId
               replyToContent: _replyingToMessage?.content,
               replyToSenderId: _replyingToMessage?.senderId,
             );
             setState(() {
-              _replyingToMessage = null; // Limpiar estado de respuesta
+              _replyingToMessage = null;
             });
           }
         }
@@ -1282,20 +1286,18 @@ if (message.replyToMessageId != null && message.replyToContent != null)
       final texto = _messageController.text.trim();
       if (texto.isNotEmpty) {
         if (_replyingToMessage != null) {
-          // Si hay un mensaje para responder, envía los datos de respuesta
-          SupabaseService().sendMessage(
+          _supabaseService.sendMessage( // Usar _supabaseService
             widget.roomId,
             texto,
-            replyToMessageId: _replyingToMessage!.id,
+            replyToMessageId: _replyingToMessage!.supabaseId, // Usar supabaseId
             replyToContent: _replyingToMessage!.content,
             replyToSenderId: _replyingToMessage!.senderId,
           );
           setState(() {
-            _replyingToMessage = null; // Limpiar el mensaje al que se responde
+            _replyingToMessage = null;
           });
         } else {
-          // Si no, envía un mensaje normal
-          SupabaseService().sendMessage(widget.roomId, texto);
+          _supabaseService.sendMessage(widget.roomId, texto); // Usar _supabaseService
         }
         _messageController.clear();
       }
@@ -1444,7 +1446,7 @@ class MediaPreviewScreen extends StatelessWidget {
                   ),
                 );
                 if (confirmDelete == true) {
-                  onDelete(message.id);
+                  onDelete(message.supabaseId); // Usar supabaseId
                   Navigator.of(context).pop();
                 }
               },

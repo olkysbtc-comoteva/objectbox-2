@@ -11,8 +11,13 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'firebase_options.dart'; 
 
+import 'package:comoteva/objectbox.dart';
+import 'package:comoteva/integrations/outbox_sync_service.dart'; // Asegúrate de importar OutboxSyncService
+
 // Quitamos la anotación de Nowa para asegurar persistencia real en la compilación externa
 late final SharedPreferences sharedPrefs;
+
+ObjectBox? objectbox;
 
 // 🔥 CONFIGURACIÓN DEL CANAL DE EMERGENCIA
 const AndroidNotificationChannel emergencyChannel = AndroidNotificationChannel(
@@ -48,6 +53,8 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 main() async {
   WidgetsFlutterBinding.ensureInitialized();
   sharedPrefs = await SharedPreferences.getInstance();
+  
+  objectbox = await ObjectBox.create();
   
   // Inicialización de las bases de datos
   await SupabaseService().initialize();
@@ -119,6 +126,18 @@ main() async {
   if (initialMessage != null) {
     _handleNotificationClick(initialMessage.data);
   }
+  
+  // En tu main.dart, al final del método main()
+  
+  // 🔥 ACTIVAR COLA DE SALIDA OFFLINE
+  // FIX: No necesitas una variable local para el singleton, se accede directamente a la instancia.
+  // final outboxService = OutboxSyncService(); // <--- ELIMINAR ESTA LÍNEA
+
+  // Inicializamos el escucha de la cola de salida
+  OutboxSyncService().listenToConnectionChanges(); // FIX: Acceso correcto al singleton
+
+  // Forzar una sincronización inicial por si quedaron pendientes de la sesión anterior
+  OutboxSyncService().syncAllPendingOperations(); // FIX: Método renombrado a syncAllPendingOperations
 
   // 🚀 LLEGAMOS AL RUNAPP
   runApp(const MyApp());
