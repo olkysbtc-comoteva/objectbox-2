@@ -381,7 +381,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ],
                   )
-                else
+                                else
                   Column(
                     children: [
                       Container(
@@ -405,8 +405,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 version: QrVersions.auto,
                                 size: 200,
                                 gapless: false,
+                                // OBLIGATORIO: H permite ocultar puntos para el logo sin romper el QR
+                                errorCorrectionLevel: QrErrorCorrectLevel.H,
+                                // Vincula aquí la ruta exacta de tu logo en assets
+                                embeddedImage: const AssetImage('assets/images/ic_launcher.png'),
                                 embeddedImageStyle: const QrEmbeddedImageStyle(
                                   size: Size(40, 40),
+                                ),
+                                // Opcional: Estilo redondeado oscuro tipo WhatsApp/Apple
+                                eyeStyle: const QrEyeStyle(
+                                  eyeShape: QrEyeShape.circle,
+                                  color: Colors.black,
+                                ),
+                                dataModuleStyle: const QrDataModuleStyle(
+                                  dataModuleShape: QrDataModuleShape.circle,
+                                  color: Colors.black,
                                 ),
                               ),
                       ),
@@ -421,7 +434,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            'Codigo dinamico (120s)',
+                            'Código dinámico (120s)',
                             style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6)),
                           ),
                         ],
@@ -430,7 +443,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 const SizedBox(height: 40),
                 AppleButton(
-                  text: _isScanning ? 'Cancelar Escaneo' : 'Escanear Codigo QR',
+                  text: _isScanning ? 'Cancelar Escaneo' : 'Escanear Código QR',
                   onPressed: () => setState(() => _isScanning = !_isScanning),
                   color: _isScanning
                       ? theme.colorScheme.surfaceContainerHighest
@@ -444,5 +457,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 }
+
 
   
